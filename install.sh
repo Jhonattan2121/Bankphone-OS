@@ -4,7 +4,9 @@
 # Nunca grava no slot ativo (o seu caminho de volta) e sempre pede confirmação digitada.
 #
 # Uso:
-#   ./install.sh                        instala (Android ligado com adb, ou aparelho já no fastboot)
+#   ./install.sh                        instala. O aparelho pode estar no Android (adb), já rodando o
+#                                       BANKPHONE (porta serial USB) ou no fastboot: o instalador leva
+#                                       sozinho ao fastboot, sem você apertar nenhum botão.
 #   ./install.sh --dry-run              faz tudo, MENOS gravar no aparelho
 #   ./install.sh --stock-boot FILE      usa o boot.img do seu aparelho em vez de buscá-lo (fastboot fetch)
 #   ./install.sh --skip-firmware        não puxa o firmware do toque
@@ -50,8 +52,17 @@ other() { [ "$1" = a ] && echo b || echo a; }
 state_get() { [ -f "$STATE" ] && sed -n "s/^$1=//p" "$STATE" | head -1; }
 
 # ------------------------------------------------------------ 1. reconhecer o aparelho
+# Porta serial USB do BANKPHONE (quando o aparelho já roda o sistema).
+find_bp_port() {
+  [ -n "${BANKPHONE_PORT:-}" ] && { echo "$BANKPHONE_PORT"; return; }
+  for p in /dev/cu.usbmodemBANKPHONE* /dev/serial/by-id/*BANKPHONE*; do
+    [ -e "$p" ] && { echo "$p"; return; }
+  done
+}
+
 MODE=""; MODEL=""
 adb_state="$(adb get-state 2>/dev/null | tr -d '\r')"
+BP_PORT="$(find_bp_port)"
 if [ "$adb_state" = "device" ]; then
   MODE="android"
   MODEL="$(adb shell getprop ro.product.model 2>/dev/null | tr -d '\r')"
@@ -60,30 +71,65 @@ if [ "$adb_state" = "device" ]; then
 elif fastboot devices 2>/dev/null | grep -q fastboot; then
   MODE="fastboot"
   say "Aparelho em modo fastboot (o modelo não pode ser lido por aqui)."
+elif [ -n "$BP_PORT" ]; then
+  MODE="bankphone"
+  say "Aparelho rodando o BANKPHONE OS (porta $BP_PORT). O modelo não pode ser lido por aqui."
+else
+  die "nenhum aparelho encontrado.
+  - Cabo USB ligado e aparelho ligado.
+  - Para o modo Android: ative Opções do desenvolvedor > Depuração USB e aceite a autorização no celular.
+  - Se o aparelho está desligado ou travado, ligue-o e rode de novo."
+fi
+if [ "$MODE" != "android" ]; then
   printf "Digite o modelo do seu aparelho para continuar (só o X669C foi testado): "
   read -r ans
   [ "$(echo "$ans" | tr a-z A-Z)" = "X669C" ] || die "modelo não confirmado. Nada foi alterado."
-else
-  die "nenhum aparelho encontrado.
-  - Cabo USB ligado e aparelho desbloqueado na tela.
-  - Para o modo Android: ative Opções do desenvolvedor > Depuração USB e aceite a autorização no celular.
-  - Ou coloque o aparelho no fastboot e rode de novo."
 fi
 
-# ------------------------------------------------------------ 2. firmware do toque (só com Android)
+wait_fastboot() {
+  for _ in $(seq 1 "${1:-45}"); do fastboot devices 2>/dev/null | grep -q fastboot && return 0; sleep 2; done
+  return 1
+}
+
 need_fastboot() {
   say "Reiniciando para o bootloader..."
   adb reboot bootloader >/dev/null 2>&1
-  for _ in $(seq 1 45); do fastboot devices 2>/dev/null | grep -q fastboot && return 0; sleep 2; done
-  die "o aparelho não apareceu no fastboot em 90 s."
+  wait_fastboot 45 || die "o aparelho não apareceu no fastboot em 90 s."
 }
 
+# Manda o comando pela serial USB: o BANKPHONE reinicia sozinho no bootloader.
+serial_to_fastboot() {
+  say "Mandando o aparelho para o fastboot pela USB (sem apertar nada)..."
+  python3 - "$BP_PORT" <<'PY' || die "não consegui abrir a porta serial $BP_PORT."
+import os, sys, termios, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+a = termios.tcgetattr(fd)
+a[0] = a[1] = a[3] = 0
+a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+a[4] = a[5] = termios.B115200
+termios.tcsetattr(fd, termios.TCSANOW, a)
+for _ in range(3):                      # 3 vezes: se a primeira se perder, a seguinte chega
+    os.write(fd, b"\nBANKPHONE:REBOOT-BOOTLOADER\n")
+    time.sleep(0.7)
+os.close(fd)
+PY
+  if ! wait_fastboot "${BANKPHONE_WAIT:-25}"; then
+    die "o aparelho não entrou no fastboot em 50 s.
+  A imagem que está no aparelho provavelmente é antiga e ainda não aceita o comando.
+  Entre no fastboot uma vez (segure Vol+ por 3 s no BANKPHONE) e rode ./install.sh de novo:
+  a imagem que este instalador grava já aceita o comando, e dali em diante é tudo automático."
+  fi
+}
+
+# ------------------------------------------------------------ 2. firmware do toque e ir ao fastboot
 if [ "$MODE" = "android" ]; then
   if [ "$RESTORE" -eq 0 ] && [ "$SKIPFW" -eq 0 ]; then
     say "Pegando o firmware do toque do seu aparelho..."
     tools/get-touch-firmware.sh || warn "sem o firmware do toque a tela NÃO responderá ao toque. O resto segue."
   fi
   need_fastboot
+elif [ "$MODE" = "bankphone" ]; then
+  serial_to_fastboot
 fi
 
 # ------------------------------------------------------------ 3. checagens no fastboot
@@ -167,7 +213,7 @@ cat <<EOF
 EOF
 if [ "$DRY" -eq 1 ]; then
   say "DRY-RUN: rodaria: fastboot flash boot_$TARGET $IMG && fastboot set_active $TARGET && fastboot reboot"
-  say "Nada foi gravado."
+  say "Nada foi gravado. O aparelho está no fastboot: para reiniciá-lo, rode  fastboot reboot"
   exit 0
 fi
 PHRASE="FLASH boot_$TARGET"

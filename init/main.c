@@ -14,6 +14,7 @@
 //   6. PID 1 nunca retorna (se /init sai, o kernel entra em panic).
 #define _GNU_SOURCE
 #include "bootdiag.h"
+#include "devcmd.h"
 #include "gfx.h"
 #include "money.h"
 #include "sec.h"
@@ -807,6 +808,30 @@ static void key_action(int code)
     }
 }
 
+// Comando pela USB (só imagens de teste): o instalador manda uma linha pela serial
+// e o aparelho reinicia sozinho no bootloader. Exige bankphone.devcmd=1 na cmdline.
+static void devcmd_poll(void)
+{
+    static int on = -1;
+    static DevCmd dc;
+    if (on < 0) {
+        on = plat_boot_prop("bankphone.devcmd")[0] == '1';
+        bd_log("devcmd: %s", on ? "ativo (imagem de teste): aceito REBOOT-BOOTLOADER pela serial" : "desligado");
+    }
+    if (!on) return;
+    int fd = bd_serial_fd();
+    if (fd < 0) return;
+    char b[64];
+    ssize_t n = read(fd, b, sizeof b);
+    if (n <= 0) return;
+    if (devcmd_feed(&dc, b, (int)n) == DEVCMD_REBOOT_BOOTLOADER) {
+        const char *arg = plat_boot_prop("bankphone.fastboot");
+        if (!arg[0]) arg = "bootloader";
+        bd_log("devcmd: reiniciando no bootloader a pedido da serial (argumento '%s')", arg);
+        bd_reboot_restart2(arg);                           /* NÃO grava partição */
+    }
+}
+
 // Brilho: UM caminho só. Depois da descoberta (F1), quem manda é o HardwareService,
 // que escreve SÓ no nó de backlight encontrado e LÊ de volta. O bd_backlight fica
 // como rede de segurança para o instante anterior à descoberta.
@@ -1033,6 +1058,7 @@ int main(void)
         if (tfd >= 0) pf[np++] = (struct pollfd){ tfd, POLLIN, 0 };
         for (int i = 0; i < nk; i++) pf[np++] = (struct pollfd){ kfd[i], POLLIN, 0 };
         poll(pf, np, 100);            /* 100 ms: o protocolo A precisa de um relógio para o UP */
+        devcmd_poll();                /* comando do instalador pela USB (só se bankphone.devcmd=1) */
 
         tc_now(&TS, now_ms());
         if (tc_tick(&TS, 250))        /* silêncio no protocolo A = dedo solto */

@@ -4,6 +4,7 @@
 # O que este script faz:
 #   - reaproveita work/stock (kernel + dtb de fábrica) e work/ramdisk.gz já gerados;
 #   - acrescenta "bankphone.ro=1" à cmdline => o init NÃO grava nenhuma partição;
+#   - acrescenta "bankphone.devcmd=1" => o install.sh pode mandar o aparelho ao fastboot pela USB;
 #   - gera work/bankphone-os-ro.img e imprime o sha256.
 #
 # O que ele NÃO faz (por política):
@@ -29,7 +30,7 @@ CMD="$(python3 - <<'PY'
 import json
 c = json.load(open("work/stock/header.json"))["cmdline"]
 c = " ".join(t for t in c.split() if not t.startswith(("slub_debug", "page_owner")))
-print((c + " bankphone.ro=1").strip())
+print((c + " bankphone.ro=1 bankphone.devcmd=1").strip())
 PY
 )"
 
