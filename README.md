@@ -8,7 +8,7 @@ It runs on the Linux kernel that already ships on the phone. Everything above th
 
 **Tested on one device only:** Infinix Hot 30i (X669C, MediaTek MT6765H). Anything else needs porting, and flashing the wrong device can make it unusable.
 
-Dev log: [#1, building a phone OS from scratch in C](https://peakd.com/hive-139531/@devferri/dev-log-1-building-a-phone-os-from-scratch-in-c-and-bricking-my-test-phone-along-the-way)
+Dev logs: [#1, building a phone OS from scratch in C](https://peakd.com/hive-139531/@devferri/dev-log-1-building-a-phone-os-from-scratch-in-c-and-bricking-my-test-phone-along-the-way) · [#2, the phone bricked itself and the OS runs again](https://peakd.com/hive-139531/@devferri/dev-log-2-my-phone-bricked-itself-and-the-os-im-building-runs-again)
 
 ## Before you flash anything
 
