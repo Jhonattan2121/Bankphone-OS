@@ -1,0 +1,22 @@
+BANKPHONE OS
+Copyright 2026 jhonattan Devferri (@devferri)
+
+This product includes software developed from scratch by the author, licensed
+under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components included in this repository:
+
+- stb_truetype.h (init/stb_truetype.h), by Sean Barrett / RAD Game Tools.
+  Public domain.
+
+- Roboto Regular font (assets/Roboto-Regular.ttf), by Google.
+  Licensed under the Apache License, Version 2.0.
+
+NOT included, and NOT covered by this license:
+
+- The touch controller firmware (Novatek) and the device's kernel, device tree and
+  boot images. They belong to their manufacturers. Each user extracts them from
+  their own device (see README.md and tools/get-touch-firmware.sh).
+
+"BANKPHONE" is the name of this project. The Apache License does not grant
+permission to use it as a trademark.

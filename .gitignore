@@ -1,0 +1,51 @@
+# BANKPHONE OS: o que NÃO vai para o repositório aberto.
+# Regra: se veio do aparelho ou da fabricante, ou é resto de trabalho, fica de fora.
+
+# --- Imagens e binários (do aparelho, da fabricante ou gerados) ---
+*.img
+*.bin
+*.gz
+*.ppm
+*.orig
+*.o
+
+# --- Pastas de trabalho e pacotes com imagens da fábrica ---
+work/
+pacote-recuperacao/
+entrega-bankphone*/
+backup-init-v6/
+
+# --- Firmware proprietário (do chip de toque Novatek): não é nosso para redistribuir.
+#     Cada pessoa extrai do próprio aparelho (veja o README). ---
+rootfs-extra/vendor/
+
+# --- Logs e capturas do aparelho (têm serial e dados do dispositivo) ---
+*.log
+serial-*.txt
+cap-*.txt
+
+# --- Restos de trabalho: versões antigas ---
+*.c.v*
+*.h.v*
+*.keep
+
+# --- Scripts que gravam no aparelho de um jeito que não recomendamos ---
+# (a regra do projeto é gravar só o slot inativo, boot_b)
+tools/flash_when_ready.sh
+
+# --- Material dos posts (rascunhos e diagramas com dados do aparelho) ---
+post/
+
+# --- Binários compilados no host ---
+/host
+/money_test
+/sec_test
+
+# --- Configuração local da sua máquina (caminhos, nunca versionar) ---
+local.env
+
+# --- Sistema e editor ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
