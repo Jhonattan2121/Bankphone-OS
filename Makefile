@@ -1,12 +1,14 @@
+# BANKPHONE OS: checks that run on a computer (no phone needed).
 # BANKPHONE OS: checagens que rodam no computador (sem o celular).
 #
-#   make test        compila e roda todos os testes
-#   make test-asan   o mesmo com AddressSanitizer + UndefinedBehaviorSanitizer
-#   make lint        compila o código com -Wall -Wextra -Werror (só checa a sintaxe)
-#   make lint-strict mostra avisos extras (-Wshadow -Wconversion), sem falhar
-#   make fuzz        compila e roda os alvos de fuzzing (FUZZ_TIME=segundos)
+#   make test        build and run all tests            / compila e roda todos os testes
+#   make test-asan   same, with AddressSanitizer + UBSan / o mesmo com AddressSanitizer + UBSan
+#   make lint        -Wall -Wextra -Werror, syntax only  / só checa a sintaxe
+#   make lint-strict extra warnings, never fails         / avisos extras, sem falhar
+#   make fuzz        run the fuzz targets (FUZZ_TIME=s)  / roda os alvos de fuzzing (FUZZ_TIME=segundos)
 #   make clean
 #
+# The installer and the phone build (install.sh, build.sh) do not go through here.
 # O instalador e o build do aparelho (install.sh, build.sh) não passam por aqui.
 
 CC       ?= cc
@@ -16,7 +18,8 @@ SAN      ?=
 
 ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 
-# Nome do teste -> fontes e flags. Os mesmos comandos do README.
+# Test name -> sources and flags (same commands as the README).
+# Nome do teste -> fontes e flags (os mesmos comandos do README).
 TESTS := money sec devcmd store touchcore bootdiag_fb
 
 SRC_money       := tests/money_test.c init/money.c
@@ -34,10 +37,12 @@ FLAGS_bootdiag_fb := -Iinit
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 
+# Sources that build on any computer (main.c and hw.c use the phone's Linux headers).
 # Fontes que compilam em qualquer computador (main.c e hw.c usam headers do Linux do aparelho).
 LINT_SRC    := init/money.c init/sec.c init/store.c init/gfx.c init/ui.c init/screens.c \
                init/sheets.c init/components.c init/icons.c init/bootdiag.c init/host.c
 LINT_DEVICE := init/main.c init/hw.c
+# Project style: several 'if' on one line. Not a bug, so it must not fail the lint.
 # Estilo do projeto: vários 'if' na mesma linha. Não é bug, então não derruba o lint.
 LINT_FLAGS  := -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter \
                -Wno-misleading-indentation -Iinit -fsyntax-only
@@ -53,6 +58,7 @@ $(BUILD)/%: $$(SRC_%) $(HDRS) | $(BUILD)
 $(BUILD):
 	mkdir -p $@
 
+# Each test prints in its own way; here we only count how many checks passed.
 # Cada teste imprime do seu jeito; aqui só se conta quantas verificações passaram.
 test: $(BINS)
 	@fail=0; total=0; \
@@ -87,9 +93,13 @@ lint-strict:
 	-$(CC) -Wall -Wextra -Wshadow -Wconversion -Wno-unused-function -Wno-unused-parameter \
 	  -Wno-misleading-indentation -Iinit -fsyntax-only init/money.c init/sec.c init/store.c
 
-# Fuzzing. O driver próprio (tests/fuzz/driver.c) roda com qualquer compilador C:
-# roda o corpus e depois muta entradas por FUZZ_TIME segundos. Semente fixa (FUZZ_SEED=n muda),
-# então uma falha se repete. Com clang também dá para usar o libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
+# Fuzzing. Our own driver (tests/fuzz/driver.c) works with any C compiler: it runs the corpus,
+# then mutates inputs for FUZZ_TIME seconds. Fixed seed (FUZZ_SEED=n changes it), so a failure
+# repeats. With clang you can use libFuzzer too: make fuzz FUZZ_ENGINE=libfuzzer
+#
+# Fuzzing. O driver próprio (tests/fuzz/driver.c) roda com qualquer compilador C: roda o corpus
+# e depois muta entradas por FUZZ_TIME segundos. Semente fixa (FUZZ_SEED=n muda), então uma
+# falha se repete. Com clang também dá para usar o libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
 FUZZ_TIME   ?= 30
 FUZZ_ENGINE ?= driver
 FUZZ_TARGETS := devcmd money

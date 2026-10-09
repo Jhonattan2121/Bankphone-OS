@@ -73,7 +73,8 @@ int main(void) {
     m_cancel(&M.tx[0], now);
     CHECK("estado terminal nao volta", M.tx[0].st == S_CONFIRMED);
 
-    /* Linha "T" sozinha: antes lia 1 byte depois do fim da string (só o ASan acusa: make test-asan). */
+    /* Lone "T" line: it used to read 1 byte past the end of the string (only ASan reports it: make test-asan).
+     * Linha "T" sozinha: antes lia 1 byte depois do fim da string (só o ASan acusa: make test-asan). */
     m_deserialize("V1 1 0\nT");
     CHECK("estado com linha T sozinha e ignorado sem ler fora do buffer", M.n == 0);
     m_deserialize("V1 1 0\n");
