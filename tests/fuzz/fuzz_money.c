@@ -1,4 +1,16 @@
-/* Fuzzing do motor de dinheiro (init/money.c).
+/* Fuzzing of the money engine (init/money.c).
+ *
+ * The first input byte picks the mode:
+ *   even -> a sequence of operations (receive, prepare Pix, quote, swap, authorize, cancel,
+ *           advance time, emergency mode...) with invariants checked after each step;
+ *   odd  -> the rest of the input is treated as a saved-state file and handed to
+ *           m_deserialize(), then everything that reads that state is exercised.
+ *
+ * Amounts follow the callers' contract: in the UI the value comes from parse_cents(), which
+ * only returns 0 to 100000000000 cents.
+ *
+ * ---- Português ----
+ * Fuzzing do motor de dinheiro (init/money.c).
  *
  * Primeiro byte da entrada escolhe o modo:
  *   par   -> sequência de operações (receber, preparar Pix, cotar, trocar, autorizar,
@@ -18,13 +30,13 @@ static int terminal(TxState s) { return s == S_CONFIRMED || s == S_FAILED || s =
 
 static void check_invariants(int64_t now, const TxState *prev, int prev_n) {
     NEED(M.n >= 0 && M.n <= MAX_TX);
-    NEED(m_balance(A_BRL) >= 0);                                  /* nunca fica negativo */
+    NEED(m_balance(A_BRL) >= 0);                                  /* never negative / nunca fica negativo */
     NEED(m_balance(A_USDC) >= 0);
-    NEED(m_pix_spent_since(now - 86400) <= M.pol.daily);          /* teto diário */
+    NEED(m_pix_spent_since(now - 86400) <= M.pol.daily);          /* daily cap / teto diário */
     for (int i = 0; i < M.n; i++) {
         const Tx *t = &M.tx[i];
-        if (t->type == T_PIX_OUT) NEED(t->from_amt <= M.pol.per_tx);   /* teto por Pix */
-        if (i < prev_n && terminal(prev[i])) NEED(t->st == prev[i]);   /* estado final não volta */
+        if (t->type == T_PIX_OUT) NEED(t->from_amt <= M.pol.per_tx);   /* per-Pix cap / teto por Pix */
+        if (i < prev_n && terminal(prev[i])) NEED(t->st == prev[i]);   /* a final state never changes / estado final não volta */
     }
 }
 
@@ -38,7 +50,7 @@ static void exercise_state_readers(void) {
 
 static int64_t amount(const uint8_t *d, size_t n, size_t *i) {
     uint64_t v = 0; for (int k = 0; k < 5 && *i < n; k++) v = (v << 8) | d[(*i)++];
-    return (int64_t)(v % 100000000001ull);                        /* 0..parse_cents máximo */
+    return (int64_t)(v % 100000000001ull);                        /* 0..parse_cents maximum / 0..máximo do parse_cents */
 }
 
 static void run_ops(const uint8_t *d, size_t n) {
@@ -66,7 +78,7 @@ static void run_ops(const uint8_t *d, size_t n) {
         prev_n = M.n;
         for (int k = 0; k < M.n; k++) prev[k] = M.tx[k].st;
     }
-    /* salvar e recarregar mantém os saldos */
+    /* saving and reloading keeps the balances / salvar e recarregar mantém os saldos */
     int64_t brl = m_balance(A_BRL), usdc = m_balance(A_USDC);
     static char buf[200000];
     m_serialize(buf, sizeof buf);

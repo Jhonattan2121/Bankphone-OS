@@ -1,4 +1,17 @@
-/* Driver mínimo de fuzzing: roda com qualquer compilador C (gcc, clang, Apple clang),
+/* Minimal fuzzing driver: works with any C compiler (gcc, clang, Apple clang), no libFuzzer
+ * needed. Used by 'make fuzz' and CI.
+ *
+ *   fuzz_x <seconds> <dir-or-file>...
+ *
+ * 1. runs every corpus file once;
+ * 2. then, for <seconds>, mutates corpus inputs (byte flips, insertion, removal, chunk copy,
+ *    edge values) and runs each result.
+ * The seed is fixed by default, so a failure repeats; change it with FUZZ_SEED=n.
+ * If an input crashes the program it is written to crash-<hash> in the current directory.
+ * With clang you can use real libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
+ *
+ * ---- Português ----
+ * Driver mínimo de fuzzing: roda com qualquer compilador C (gcc, clang, Apple clang),
  * sem libFuzzer. Serve para o 'make fuzz' e para o CI.
  *
  *   fuzz_x <segundos> <pasta-ou-arquivo>...
@@ -85,7 +98,7 @@ int main(int argc, char **argv) {
     unsigned long long execs = ncorp; time_t end = time(NULL) + secs;
     while (time(NULL) < end) {
         for (int k = 0; k < 2000; k++) { mutate(); LLVMFuzzerTestOneInput(cur, curn); execs++; }
-        if (curn < MAXLEN && rnd() % 8 == 0) add(cur, curn);   /* guarda algumas mutações como novas sementes */
+        if (curn < MAXLEN && rnd() % 8 == 0) add(cur, curn);   /* keep some mutations as new seeds / guarda algumas mutações como novas sementes */
     }
     printf("ok: %llu execucoes, %d sementes\n", execs, ncorp);
     return 0;
