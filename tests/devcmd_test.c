@@ -22,6 +22,9 @@ int main(void) {
     CHECK("depois da linha enorme o comando volta a funcionar", feed(&c, "BANKPHONE:REBOOT-BOOTLOADER\n") == DEVCMD_REBOOT_BOOTLOADER);
     memset(&c, 0, sizeof c);
     CHECK("linha enorme que termina com o comando nao dispara", feed(&c, big) == DEVCMD_NONE && feed(&c, "BANKPHONE:REBOOT-BOOTLOADER\n") == DEVCMD_NONE);
+    memset(&c, 0, sizeof c);
+    CHECK("NUL no fim da linha nao dispara", devcmd_feed(&c, "BANKPHONE:REBOOT-BOOTLOADER\0\n", 29) == DEVCMD_NONE);
+    CHECK("NUL no meio com lixo depois nao dispara", devcmd_feed(&c, "BANKPHONE:REBOOT-BOOTLOADER\0xyz\n", 32) == DEVCMD_NONE);
     puts(fails ? "FALHOU" : "TODOS OK");
     return fails != 0;
 }

@@ -24,7 +24,8 @@ static inline int devcmd_feed(DevCmd *c, const char *p, int len)
         if (ch == '\n' || ch == '\r') {
             if (!c->overflow && c->n > 0) {
                 c->buf[c->n] = 0;
-                if (!strcmp(c->buf, "BANKPHONE:REBOOT-BOOTLOADER")) r = DEVCMD_REBOOT_BOOTLOADER;
+                /* memcmp com o tamanho: um NUL no meio da linha não pode esconder lixo depois dele. */
+                if (c->n == (int)sizeof "BANKPHONE:REBOOT-BOOTLOADER" - 1 && !memcmp(c->buf, "BANKPHONE:REBOOT-BOOTLOADER", (size_t)c->n)) r = DEVCMD_REBOOT_BOOTLOADER;
             }
             c->n = 0; c->overflow = 0;
         } else if (c->n < (int)sizeof c->buf - 1) {
