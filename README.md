@@ -52,14 +52,16 @@ Manual steps: `tools/get-touch-firmware.sh`, then `./build.sh` (needs `ZIG` and 
 
 ## Try it without a phone
 
-Run the tests:
+Run the tests (a C compiler and `make` are enough):
 
 ```bash
-cc -o /tmp/money_test tests/money_test.c init/money.c -lm && /tmp/money_test
-cc -o /tmp/sec_test   tests/sec_test.c   init/sec.c   -lm && /tmp/sec_test
+make test        # money engine, security, USB command, persistent state, touch, boot display
+make test-asan   # same, with AddressSanitizer and UBSan
+make lint
+make fuzz        # fuzzes the USB command parser and the money engine
 ```
 
-The money engine prints `TODOS OK` (39 checks), and the security tests pass 7 checks.
+`make test` prints one line per test program and the total. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Render the screens to PNG with the same drawing code the phone runs:
 
@@ -73,6 +75,8 @@ Render the screens to PNG with the same drawing code the phone runs:
 |---|---|
 | `init/` | PID 1, graphics, UI, money engine, security, storage, hardware access, boot diagnostics |
 | `tests/`, `init/tests/` | unit tests |
+| `tests/fuzz/` | fuzz targets and seed corpus |
+| `Makefile`, `.github/` | `make test`, `make lint`, `make fuzz`, and CI |
 | `tools/` | boot image and ramdisk packers, touch firmware helper |
 | `scripts/` | host preview, test image packer, state region hash |
 | `install.sh`, `build.sh` | installer and build |
@@ -130,7 +134,7 @@ Ainda não verificado: o `fastboot fetch` em um X669C de verdade e o `adb pull` 
 
 ## Testar sem o celular
 
-Os dois comandos de testes e o `./scripts/host-preview.sh out/`, mostrados acima, funcionam só no computador.
+`make test`, `make test-asan`, `make lint`, `make fuzz` e o `./scripts/host-preview.sh out/` funcionam só no computador, sem o celular. Veja o [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licença
 

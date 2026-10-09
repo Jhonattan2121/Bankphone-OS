@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        run: make test
+      - name: Tests with AddressSanitizer and UBSan
+        run: make test-asan
+      - name: Lint
+        run: make lint
+      - name: Fuzz (short)
+        run: make fuzz FUZZ_TIME=20
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        run: make test
+      - name: Lint
+        run: make lint
