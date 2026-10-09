@@ -20,6 +20,8 @@ make fuzz        # fuzzes the USB command parser and the money engine (FUZZ_TIME
 make clean
 ```
 
+On macOS the `touchcore` and `bootdiag_fb` tests (and the lint of `bootdiag.c`, `main.c`, `hw.c`) are skipped, because that code includes Linux-only headers; the Linux CI job runs them.
+
 `make test` prints one line per test program and a total. It exits with an error if anything fails, which is what CI uses.
 
 Run `make test-asan` before sending a change that touches `init/money.c`, `init/sec.c`, `init/store.c` or `init/devcmd.h`. A few bugs only show up there.
@@ -60,6 +62,8 @@ make lint        # -Wall -Wextra -Werror, só checa a sintaxe
 make fuzz        # fuzzing do parser de comando USB e do motor de dinheiro (FUZZ_TIME=30 segundos cada)
 make clean
 ```
+
+No macOS os testes `touchcore` e `bootdiag_fb` (e o lint de `bootdiag.c`, `main.c`, `hw.c`) são pulados, porque esse código inclui headers só do Linux; o job de CI do Linux roda todos.
 
 O `make test` mostra uma linha por programa de teste e o total. Ele termina com erro se algo falhar, que é o que o CI usa.
 

@@ -20,7 +20,18 @@ ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-
 
 # Test name -> sources and flags (same commands as the README).
 # Nome do teste -> fontes e flags (os mesmos comandos do README).
-TESTS := money sec devcmd store touchcore bootdiag_fb
+TESTS := money sec devcmd store
+
+# touchcore and bootdiag_fb include Linux-only headers (linux/input.h, linux/fb.h), so they
+# only build on Linux. Everything else builds on macOS too.
+# touchcore e bootdiag_fb incluem headers só do Linux (linux/input.h, linux/fb.h), então só
+# compilam no Linux. O resto compila também no macOS.
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Linux)
+TESTS += touchcore bootdiag_fb
+else
+$(info note: touchcore and bootdiag_fb need Linux headers and are skipped on $(UNAME) / precisam de headers do Linux e foram puladas no $(UNAME))
+endif
 
 SRC_money       := tests/money_test.c init/money.c
 LIBS_money      := -lm
@@ -37,11 +48,13 @@ FLAGS_bootdiag_fb := -Iinit
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 
-# Sources that build on any computer (main.c and hw.c use the phone's Linux headers).
-# Fontes que compilam em qualquer computador (main.c e hw.c usam headers do Linux do aparelho).
+# Sources that build on any computer. bootdiag.c, main.c and hw.c use the phone's Linux headers,
+# so they are only linted on Linux.
+# Fontes que compilam em qualquer computador. bootdiag.c, main.c e hw.c usam headers do Linux do
+# aparelho, então só passam pelo lint no Linux.
 LINT_SRC    := init/money.c init/sec.c init/store.c init/gfx.c init/ui.c init/screens.c \
-               init/sheets.c init/components.c init/icons.c init/bootdiag.c init/host.c
-LINT_DEVICE := init/main.c init/hw.c
+               init/sheets.c init/components.c init/icons.c init/host.c
+LINT_DEVICE := init/bootdiag.c init/main.c init/hw.c
 # Project style: several 'if' on one line. Not a bug, so it must not fail the lint.
 # Estilo do projeto: vários 'if' na mesma linha. Não é bug, então não derruba o lint.
 LINT_FLAGS  := -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter \
@@ -84,7 +97,7 @@ test-asan:
 
 lint:
 	$(CC) $(LINT_FLAGS) $(LINT_SRC)
-ifeq ($(shell uname -s),Linux)
+ifeq ($(UNAME),Linux)
 	$(CC) $(LINT_FLAGS) $(LINT_DEVICE)
 endif
 	@echo "lint OK"
