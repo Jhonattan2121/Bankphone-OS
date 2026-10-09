@@ -176,7 +176,7 @@ int m_deserialize(const char *buf) {
     char *b = strdup(buf), *sv = NULL; int ok = 1;
     for (char *l = strtok_r(b, "\n", &sv); l; l = strtok_r(NULL, "\n", &sv)) {
         if (l[0] == 'V') { unsigned s; int e; if (sscanf(l, "V1 %u %d", &s, &e) == 2) { M.seq = s; M.emergency = e; } else ok = 0; continue; }
-        if (l[0] != 'T' || M.n >= MAX_TX) continue;
+        if (l[0] != 'T' || !l[1] || M.n >= MAX_TX) continue;   // linha "T" sozinha: l + 2 passaria do fim da string
         Tx *t = &M.tx[M.n]; memset(t, 0, sizeof *t);
         char id[16], idem[64], cp[48], fail[100], hash[80]; int ty, st, f, to; long long fa, ta, fee, cr;
         char *p = l + 2; char *f_[13]; int k = 0; f_[k++] = p;
