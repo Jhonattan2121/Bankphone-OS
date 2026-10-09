@@ -49,3 +49,4 @@ local.env
 .vscode/
 .idea/
 *.swp
+build/
