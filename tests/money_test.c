@@ -69,9 +69,14 @@ int main(void) {
     CHECK("deserializa ok", m_deserialize(buf));
     CHECK("saldos iguais apos recarregar", m_balance(A_BRL) == brl && m_balance(A_USDC) == usdc);
     CHECK("tx pendente vira EXPIRED ao recarregar", M.n == cnt + 1 && M.tx[M.n - 1].st == S_EXPIRED);
+    free(buf);
     m_cancel(&M.tx[0], now);
     CHECK("estado terminal nao volta", M.tx[0].st == S_CONFIRMED);
 
+    /* Linha "T" sozinha: antes lia 1 byte depois do fim da string (só o ASan acusa: make test-asan). */
+    m_deserialize("V1 1 0\nT");
+    CHECK("estado com linha T sozinha e ignorado sem ler fora do buffer", M.n == 0);
+    m_deserialize("V1 1 0\n");
     fmt_money(b, sizeof b, A_BRL, 1248032); CHECK("format BRL", !strcmp(b, "R$ 12.480,32"));
     fmt_money(b, sizeof b, A_USDC, 177946428); CHECK("format USDC", !strcmp(b, "$ 177.94"));
     fmt_money(b, sizeof b, A_BRL, 5); CHECK("format 0,05", !strcmp(b, "R$ 0,05"));
