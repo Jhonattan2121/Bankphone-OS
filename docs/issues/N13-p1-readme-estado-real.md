@@ -26,7 +26,7 @@ Um README que diferencia, para cada capacidade, **Implementado / Testado no host
 - [ ] Seção "Arquitetura": boot e userland (diagrama curto), apontando para `docs/BOOT_FLOW.md` (N01).
 - [ ] Seção "O que é simulado": tudo no modo DEMO, com a lista (N12).
 - [ ] Seção "O que não existe": carteira, rede, chaves em hardware, verified boot, Pix real.
-- [ ] Seção "Riscos conhecidos e limitações", incluindo o contador de PIN em memória e a ausência de TEE.
+- [ ] Seção "Riscos conhecidos e limitações", incluindo o contador de PIN (gravado só com a área de estado armada e depois da conferência) e a ausência de TEE.
 - [ ] Link para `docs/RECOVERY.md` (N02) **marcando o que está testado e o que é planejado**.
 - [ ] Como compilar, rodar testes, ler a auditoria e contribuir (links para `CONTRIBUTING.md`, `ROADMAP.md`, templates).
 - [ ] Não afirmar que é substituto do Android nem sistema bancário pronto.

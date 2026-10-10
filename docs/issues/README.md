@@ -49,7 +49,7 @@ bugs confirmados: são hipóteses ou verificações que dependem do aparelho.
 
 | Pedido do plano | Issue existente | O que fazer |
 |---|---|---|
-| Revisar a KDF do PIN e a proteção contra tentativas | [#2](https://github.com/Jhonattan2121/Bankphone-OS/issues/2) e PR #13 | Mesclar o PR #13. O contador persistente de tentativas fica no #9. |
+| Revisar a KDF do PIN e a proteção contra tentativas | [#2](https://github.com/Jhonattan2121/Bankphone-OS/issues/2) e PR #13 | Mesclar o PR #13. O contador de tentativas já é gravado quando a área de estado está armada; gravá-lo **antes** da conferência e a proteção contra rollback ficam no #9. |
 | Modelo de ameaças | [#2](https://github.com/Jhonattan2121/Bankphone-OS/issues/2); `docs/THREAT_MODEL.md` no PR #13 | Estender depois do PR #13 (superfície USB, atualização, rollback). |
 | Estado cifrado, rollback, relógio monotônico | [#9](https://github.com/Jhonattan2121/Bankphone-OS/issues/9) | Reaproveitar. Auditoria do **carregamento** é a N15. |
 | CI, sanitizers, fuzzing | [#10](https://github.com/Jhonattan2121/Bankphone-OS/issues/10) (≈70% feita) | Reaproveitar. CI do aparelho (ARM64) é a N18. |

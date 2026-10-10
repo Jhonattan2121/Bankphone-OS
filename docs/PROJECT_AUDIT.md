@@ -62,7 +62,7 @@ Prioridades: P0 bloqueador, P1 alta, P2 média, P3 evolução. "Estado" nunca é
 | Toque | Núcleo de eventos testado no host (21 checks). Descoberta do nó e "kick" de firmware no `main.c`. **No aparelho: NÃO VERIFICADO aqui.** | `init/touchcore.h`, `init/main.c:263-700`, `init/tests/test_touchcore.c` | Alto | Arquivar evidência (N09) |
 | USB/recovery | Comando `REBOOT-BOOTLOADER` testado no host (16 checks + fuzz). Gadget ACM configurado no `main.c`, **sem teste de host**. README admite que a volta A/B e o comando serial **não foram provados**. | `init/devcmd.h`, `init/main.c:103-126`, README | Alto | Especificar o protocolo (N10); provar A/B (N02) |
 | Persistência | `store.c` com dois slots, marcador PENDING e CRC, **testado no host com 171 checks** inclusive queda de energia em cada passo. No aparelho: NÃO VERIFICADO. Sem cifra e sem autenticação. | `init/store.c`, `init/tests/test_store.c` | Alto | Auditar o carregamento (N15); cifra/rollback no #9 |
-| Segurança | PIN: SHA-256 iterado (50.000), salt, PIN cortado em 16 bytes, comparação em tempo constante. 7 checks no host. **PR #13 troca por scrypt** (não mesclado). Contador de erros só em memória. | `init/sec.c:35-52` (na `main`), `tests/sec_test.c` | Alto | Mesclar #13; achados F-04, F-06 |
+| Segurança | PIN: SHA-256 iterado (50.000), salt, PIN cortado em 16 bytes, comparação em tempo constante. 7 checks no host. **PR #13 troca por scrypt** (não mesclado). O contador de erros é gravado com o estado a cada tentativa **só quando a área de estado está armada**, e **depois** da conferência (`init/ui.c:228-229`); em imagem somente leitura fica na memória. | `init/sec.c:35-52` (na `main`), `tests/sec_test.c` | Alto | Mesclar #13; achados F-04, F-06 |
 | Motor financeiro | Estados, idempotência, tetos e expiração de cotação **testados no host (40 checks) e por fuzzing**. Invariantes só em parte formalizadas. Autenticação decidida pelo chamador (F-06). | `init/money.c`, `tests/money_test.c`, `tests/fuzz/fuzz_money.c` | Alto | Especificar invariantes (N11); fronteira de auth (N07) |
 | Build/CI | Makefile e CI verdes. **Build ARM64 e empacotamento: NÃO VERIFICADOS aqui.** Sem hashes publicados dos artefatos, sem versões fixadas. | `Makefile`, `.github/workflows/ci.yml`, `build.sh` | Médio | Build reproduzível (N18) |
 | Documentação | README bilíngue e honesto sobre DEMO. Mas: referências a ferramentas e caminhos que não existem, sem guia de recuperação, sem roadmap. | README; seção 5, F-07 | Médio | N13, N16, N20 |
@@ -188,7 +188,7 @@ Comandos rodados em `main` (`86cda6f`), Linux x86-64, `cc` (gcc):
 ## 10. Riscos de segurança (resumo honesto)
 
 - **Sem TEE, sem verified boot e com bootloader destravado**, quem tem o aparelho consegue copiar o armazenamento e atacar o PIN offline. PIN de 6 dígitos não resiste a isso com nenhum KDF (detalhes em `docs/THREAT_MODEL.md` no PR #13).
-- O contador de tentativas de PIN é **só memória**: reiniciar o aparelho o zera (#9).
+- O contador de tentativas de PIN é gravado a cada tentativa **quando a área de estado está armada** (`plat_save()` logo depois de `pin_check()`, `init/ui.c:228-229`), mas **não** em imagem somente leitura, onde reiniciar o zera. Mesmo armado, é gravado **depois** da conferência, e o estado pode ser restaurado por quem edita o armazenamento (#9).
 - O estado salvo tem **CRC, não autenticação**: detecta corrupção acidental, não adulteração (#9).
 - O motor financeiro **não impõe** a política de autenticação sozinho (F-06).
 - O relatório de boot grava em partição bruta por padrão na imagem completa (F-05).
