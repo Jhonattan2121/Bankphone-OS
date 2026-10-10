@@ -52,4 +52,5 @@ int64_t parse_cents(const char *digits);                         // só dígitos
 
 // serialização para persistência
 size_t  m_serialize(char *buf, size_t cap);
-int     m_deserialize(const char *buf);
+int     m_deserialize(const char *buf);       // 1 ok · 0 inválido (livro-razão fica vazio; motivo em m_deserialize_error)
+const char *m_deserialize_error(void);

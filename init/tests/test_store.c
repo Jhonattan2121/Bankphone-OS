@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 /* ------------------------------------------------------------- contadores -- */
 static int falhas, checks;
@@ -390,6 +391,18 @@ int main(void)
         char buf[512]; size_t n = 0;
         store_load(buf, sizeof buf, &n); buf[n] = 0;
         CHK(strcmp(buf, "P1|pin=1|tx=5") == 0, "deveria ler a 6ª gravação, leu '%s'", buf);
+    }
+
+    /* ------------------------------------------------------------- 16 -- */
+    printf("\n[16] store_open repetido não vaza descritor / repeated store_open does not leak an fd\n");
+    {
+        mkpart(0);
+        char h[24]; regiao_hash(h);
+        abrir(h);
+        int antes = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) antes++;
+        for (int i = 0; i < 20; i++) { store_config("file:" PATH, h); store_open(); }   /* sem store_close, como o main.c / no store_close, like main.c */
+        int depois = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) depois++;
+        CHK(depois == antes, "descritores abertos: %d antes, %d depois", antes, depois);
     }
 
     unlink(PATH);

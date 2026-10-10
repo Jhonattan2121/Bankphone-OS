@@ -904,7 +904,22 @@ static void load_state(void)
     int r = store_load(buf, sizeof buf - 1, &n);
     if (r == 0) {
         buf[n] = 0; char *nl = strchr(buf, '\n');
-        if (buf[0] == 'P' && nl) { *nl = 0; pin_deserialize(buf); m_deserialize(nl + 1); }
+        if (buf[0] == 'P' && nl) {
+            /* PIN e livro-razão são aplicados juntos ou nenhum: se um dos dois for recusado, o PIN volta
+             * ao que era e o motivo vai para o relatório.
+             * PIN and ledger apply together or not at all: if either is refused, the PIN is restored
+             * and the reason goes in the report. */
+            Pin antes = PIN; *nl = 0;
+            if (!pin_deserialize(buf)) {
+                PIN = antes; m_init();
+                bd_log("store: linha do PIN recusada — seguindo com estado novo");
+            } else if (!m_deserialize(nl + 1)) {
+                PIN = antes;
+                bd_log("store: livro-razão recusado (%s) — seguindo com estado novo", m_deserialize_error());
+            }
+        } else {
+            bd_log("store: estado sem cabeçalho de PIN reconhecível — seguindo com estado novo");
+        }
         bd_log("store: carregado (pin=%d tx=%d, %u bytes, slot %s%s)",
                PIN.set, M.n, (unsigned)n,
                ST.seq[0] >= ST.seq[1] ? "A" : "B", ST.recovered ? ", RECUPERADO do outro slot" : "");

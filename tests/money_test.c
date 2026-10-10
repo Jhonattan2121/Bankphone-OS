@@ -77,6 +77,37 @@ int main(void) {
      * Linha "T" sozinha: antes lia 1 byte depois do fim da string (só o ASan acusa: make test-asan). */
     m_deserialize("V1 1 0\nT");
     CHECK("estado com linha T sozinha e ignorado sem ler fora do buffer", M.n == 0);
+
+    /* ---- m_receive_pix nao confia no chamador (achado pelo fuzzer da N15) ---- */
+    m_init(); m_load_demo(now);
+    { int n0 = M.n; int64_t brl0 = m_balance(A_BRL);
+      CHECK("receber valor zero e recusado", m_receive_pix(0, "Joao", now) == NULL);
+      CHECK("receber valor negativo e recusado", m_receive_pix(-500, "Joao", now) == NULL);
+      CHECK("receber valor acima do teto de sanidade e recusado", m_receive_pix(1000000000000001LL, "Joao", now) == NULL);
+      CHECK("recusas nao mudam saldo nem livro-razao", M.n == n0 && m_balance(A_BRL) == brl0);
+      CHECK("receber valor normal continua funcionando", m_receive_pix(100, "Joao", now) != NULL && m_balance(A_BRL) == brl0 + 100); }
+
+    /* ---- carga tudo-ou-nada: estado ruim e recusado por inteiro, com motivo ----
+     * ---- all-or-nothing load: a bad state is refused whole, with a reason ---- */
+    { const char *bad[] = {
+        "V1 1 0\nlixo\n",
+        "V1 1 0\nV1 1 0\n",
+        "V1 1 2\n",
+        "V9 1 0\n",
+        "T|a|b\n",
+        "V1 1 0\nT|id1|k1|0|0|0|0|1|0|0|0||\n",
+        "V1 1 0\nT|id1|k1|2|10|-1|0|-5|0|0|0|||x\n" };
+      for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
+          m_init(); m_load_demo(now);
+          int ok = m_deserialize(bad[i]);
+          CHECK("estado invalido e recusado", !ok);
+          CHECK("recusa deixa o livro-razao vazio", M.n == 0);
+          CHECK("recusa informa o motivo", m_deserialize_error()[0] != 0);
+      }
+      m_init(); m_load_demo(now);
+      { char sv[200000]; m_serialize(sv, sizeof sv);
+        CHECK("estado valido continua sendo aceito", m_deserialize(sv) && M.n > 0); } }
+
     m_deserialize("V1 1 0\n");
     fmt_money(b, sizeof b, A_BRL, 1248032); CHECK("format BRL", !strcmp(b, "R$ 12.480,32"));
     fmt_money(b, sizeof b, A_USDC, 177946428); CHECK("format USDC", !strcmp(b, "$ 177.94"));
