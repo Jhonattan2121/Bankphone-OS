@@ -14,6 +14,7 @@
 //   6. PID 1 nunca retorna (se /init sai, o kernel entra em panic).
 #define _GNU_SOURCE
 #include "bootdiag.h"
+#include "cmdline.h"
 #include "devcmd.h"
 #include "gfx.h"
 #include "money.h"
@@ -857,11 +858,11 @@ void plat_save(void)
 }
 const char *plat_boot_prop(const char *key)
 {
-    static char v[64]; v[0] = 0; static char cl[4096]; static int got;
+    /* O parsing (token inteiro, ordem livre, último vale, buffers que giram) está em cmdline.h, testado no host.
+     * Parsing (whole token, any order, last wins, rotating buffers) lives in cmdline.h, host-tested. */
+    static char cl[4096]; static int got;
     if (!got) { int f = open("/proc/cmdline", O_RDONLY); if (f >= 0) { ssize_t n = read(f, cl, sizeof cl - 1); cl[n > 0 ? n : 0] = 0; close(f); } got = 1; }
-    char *p = strstr(cl, key); size_t kl = strlen(key);
-    if (p && p[kl] == '=') { p += kl + 1; size_t i = 0; while (*p && *p != ' ' && *p != '\n' && i < sizeof v - 1) v[i++] = *p++; v[i] = 0; }
-    return v;
+    return cmdline_prop(cl, key);
 }
 
 /* O store não conhece o bd_log: quem usa é que aponta o destino dos avisos. */
@@ -878,9 +879,14 @@ static void load_state(void)
     make_nodes();
     store_set_log(store_log_bridge);
 
-    const char *ro    = plat_boot_prop("bankphone.ro");
-    const char *spec  = plat_boot_prop("bankphone.state");
-    const char *hash  = plat_boot_prop("bankphone.statehash");
+    /* Copia na hora: o resultado de plat_boot_prop() não deve ser guardado por mais que algumas chamadas.
+     * (Antes os três ponteiros apontavam para o MESMO buffer e valiam todos o valor da última chamada.)
+     * Copy right away: do not keep a plat_boot_prop() result for more than a few calls.
+     * (The three pointers used to alias ONE buffer and all held the value of the last call.) */
+    char ro[CMDLINE_VALUE_MAX], spec[CMDLINE_VALUE_MAX], hash[CMDLINE_VALUE_MAX];
+    snprintf(ro, sizeof ro, "%s", plat_boot_prop("bankphone.ro"));
+    snprintf(spec, sizeof spec, "%s", plat_boot_prop("bankphone.state"));
+    snprintf(hash, sizeof hash, "%s", plat_boot_prop("bankphone.statehash"));
 
     if (ro[0] == '1') {
         bd_log("store: SOMENTE LEITURA (cmdline bankphone.ro=1) — nenhuma partição será gravada%s",

@@ -20,7 +20,7 @@ ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-
 
 # Test name -> sources and flags (same commands as the README).
 # Nome do teste -> fontes e flags (os mesmos comandos do README).
-TESTS := money sec devcmd store
+TESTS := money sec devcmd store cmdline
 
 # touchcore and bootdiag_fb include Linux-only headers (linux/input.h, linux/fb.h), so they
 # only build on Linux. Everything else builds on macOS too.
@@ -38,6 +38,7 @@ LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
 SRC_devcmd      := tests/devcmd_test.c
+SRC_cmdline     := tests/cmdline_test.c
 SRC_store       := init/tests/test_store.c init/store.c init/sec.c
 FLAGS_store     := -DBANKPHONE_STORE_TEST
 LIBS_store      := -lm
@@ -79,7 +80,7 @@ test: $(BINS)
 	  log=$(BUILD)/$$t.log; \
 	  if $(BUILD)/$$t > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
 	  case $$t in \
-	    money|sec|devcmd) n=$$(grep -c '^PASS' $$log) ;; \
+	    money|sec|devcmd|cmdline) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
@@ -115,7 +116,7 @@ lint-strict:
 # falha se repete. Com clang também dá para usar o libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
 FUZZ_TIME   ?= 30
 FUZZ_ENGINE ?= driver
-FUZZ_TARGETS := devcmd money
+FUZZ_TARGETS := devcmd money cmdline
 FUZZ_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 ifeq ($(FUZZ_ENGINE),libfuzzer)
 FUZZ_CC     := clang
@@ -131,6 +132,7 @@ endif
 
 SRC_fuzz_devcmd := tests/fuzz/fuzz_devcmd.c
 SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c
+SRC_fuzz_cmdline := tests/fuzz/fuzz_cmdline.c
 LIBS_fuzz_money := -lm
 
 build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
@@ -140,7 +142,7 @@ build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 fuzz: $(addprefix build/fuzz/fuzz_,$(FUZZ_TARGETS))
 	@for f in $(FUZZ_TARGETS); do \
 	  echo "== fuzz_$$f ($(FUZZ_TIME)s, $(FUZZ_ENGINE))"; \
-	  case $$f in devcmd) $(call FUZZ_RUN,devcmd) ;; money) $(call FUZZ_RUN,money) ;; esac || exit 1; \
+	  $(call FUZZ_RUN,$$f) || exit 1; \
 	done
 
 clean:
