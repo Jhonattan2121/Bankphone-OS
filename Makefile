@@ -6,6 +6,7 @@
 #   make lint        -Wall -Wextra -Werror, syntax only  / só checa a sintaxe
 #   make lint-strict extra warnings, never fails         / avisos extras, sem falhar
 #   make fuzz        run the fuzz targets (FUZZ_TIME=s)  / roda os alvos de fuzzing (FUZZ_TIME=segundos)
+#   make bench-kdf   time the PIN KDF on this machine    / mede o KDF do PIN nesta máquina
 #   make clean
 #
 # The installer and the phone build (install.sh, build.sh) do not go through here.
@@ -61,7 +62,7 @@ LINT_FLAGS  := -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter 
                -Wno-misleading-indentation -Iinit -fsyntax-only
 
 .SECONDEXPANSION:
-.PHONY: all test test-asan lint lint-strict fuzz clean
+.PHONY: all test test-asan lint lint-strict fuzz bench-kdf clean
 
 all: test
 
@@ -115,7 +116,7 @@ lint-strict:
 # falha se repete. Com clang também dá para usar o libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
 FUZZ_TIME   ?= 30
 FUZZ_ENGINE ?= driver
-FUZZ_TARGETS := devcmd money
+FUZZ_TARGETS := devcmd money pin
 FUZZ_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 ifeq ($(FUZZ_ENGINE),libfuzzer)
 FUZZ_CC     := clang
@@ -131,7 +132,9 @@ endif
 
 SRC_fuzz_devcmd := tests/fuzz/fuzz_devcmd.c
 SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c
+SRC_fuzz_pin    := tests/fuzz/fuzz_pin.c init/sec.c
 LIBS_fuzz_money := -lm
+LIBS_fuzz_pin   := -lm
 
 build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 	@mkdir -p build/fuzz
@@ -140,8 +143,13 @@ build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 fuzz: $(addprefix build/fuzz/fuzz_,$(FUZZ_TARGETS))
 	@for f in $(FUZZ_TARGETS); do \
 	  echo "== fuzz_$$f ($(FUZZ_TIME)s, $(FUZZ_ENGINE))"; \
-	  case $$f in devcmd) $(call FUZZ_RUN,devcmd) ;; money) $(call FUZZ_RUN,money) ;; esac || exit 1; \
+	  case $$f in devcmd) $(call FUZZ_RUN,devcmd) ;; money) $(call FUZZ_RUN,money) ;; pin) $(call FUZZ_RUN,pin) ;; esac || exit 1; \
 	done
+
+# Time the PIN KDF on this machine. / Mede o KDF do PIN nesta máquina.
+bench-kdf: | $(BUILD)
+	$(CC) -O2 -Wall -Wextra -o $(BUILD)/bench_kdf tools/bench_kdf.c init/sec.c
+	$(BUILD)/bench_kdf
 
 clean:
 	rm -rf build
