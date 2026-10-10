@@ -100,6 +100,16 @@ int main(void) {
     pin_forget_key();
     T("pin_check errado nao devolve a chave", pin_check("654321", 1001) == 1 && pin_state_key() == NULL);
 
+    /* ---------- the state key never reaches the saved state / a chave do estado nunca vai para o estado gravado ---------- */
+    {
+        pin_set("123456", salt);
+        char line[256], keyhex[65]; pin_serialize(line, sizeof line);
+        const uint8_t *k = pin_state_key(); T("ha chave do estado para procurar", k != NULL);
+        if (k) { hex(keyhex, k, 32); T("a linha gravada nao contem a chave do estado", strstr(line, keyhex) == NULL); }
+        char vh[65]; hex(vh, PIN.hash, 32);
+        T("a linha gravada contem o verificador (hex do PIN.hash)", strstr(line, vh) != NULL);
+    }
+
     /* ---------- passphrases: no truncation, limits / sem truncar, com limites ---------- */
     {
         const char *p40 = "abcdefghijklmnopqrstuvwxyz0123456789ABCD";            /* 40 chars */

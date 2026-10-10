@@ -36,7 +36,7 @@ PIN (issue #2). Vai mudar quando a carteira, o estado persistente e as outras is
 
 | Attacker | What they can do | Defended? |
 |---|---|---|
-| **A1. Thief with the locked phone, no tools** | Types PINs on the screen | **Yes, partly.** 5 wrong tries lock the phone, with a delay that doubles up to about 32 minutes. The counter is **kept in memory only**, so a reboot resets it until persistent state (issue #9) lands. |
+| **A1. Thief with the locked phone, no tools** | Types PINs on the screen | **Yes, partly.** 5 wrong tries lock the phone, with a delay that doubles up to about 32 minutes. The counter is saved with the state after each try, but **only when the state area is armed** (`plat_save()` right after `pin_check()`); the read-only test images keep it in memory, so a reboot resets it there. It is saved **after** the PIN check, so cutting the power during the check can lose a try, and whoever can edit storage can restore an older copy (issue #9). |
 | **A2. Thief with the phone and tools** (unlocked bootloader, reads the storage) | Copies the verifier and guesses PINs offline, no lockout | **Only by the KDF cost and by PIN length.** See the numbers below. A 6-digit PIN falls. |
 | **A3. Malicious USB host** | Sends commands on the serial port | **Yes.** The only command (`REBOOT-BOOTLOADER`) exists only in test images (`bankphone.devcmd=1`); a production image accepts none. The reader was fuzzed. |
 | **A4. Someone watching the screen** | Reads the PIN as it is typed | **No.** The keypad is fixed. |
@@ -105,7 +105,7 @@ UI change is not done.
 - **The cost on the phone is not measured.** The default (2^15, 32 MiB) is a starting point. It must be
   timed on the X669C (`make bench-kdf` cross-compiled), aiming at about 0.5 to 1 s, never above 2 s. The
   unlock screen **freezes while the KDF runs**, as the UI is single-threaded.
-- **The failed-attempt counter is not persistent** (issue #9). Without it, A1 is weaker than it looks.
+- **The failed-attempt counter is only as strong as the state area behind it.** It is saved after each try when the state area is armed, **not** in read-only images, and it is written after the check instead of before (issue #9). Rollback of the state by someone who edits storage offline is not solved. Without these, A1 is weaker than it looks.
 - **Rollback of the state** by someone who edits storage offline is not solved (issue #9).
 - **Hardware-backed keys** do not exist on this device.
 - The lock screen still takes **6 digits only**.
@@ -144,7 +144,7 @@ Open an issue. Do not post anything taken from a real device (keys, dumps, image
 
 | Atacante | O que consegue | Defendido? |
 |---|---|---|
-| **A1. Ladrão com o celular bloqueado, sem ferramentas** | Digita PINs na tela | **Sim, em parte.** 5 erros bloqueiam, com espera que dobra até cerca de 32 minutos. O contador fica **só na memória**, então reiniciar zera enquanto o estado persistente (issue #9) não existir. |
+| **A1. Ladrão com o celular bloqueado, sem ferramentas** | Digita PINs na tela | **Sim, em parte.** 5 erros bloqueiam, com espera que dobra até cerca de 32 minutos. O contador é gravado com o estado depois de cada tentativa, mas **só quando a área de estado está armada** (`plat_save()` logo depois do `pin_check()`); as imagens de teste somente leitura o mantêm na memória, então reiniciar o zera ali. Ele é gravado **depois** de conferir o PIN, então faltar energia durante a conferência pode perder uma tentativa, e quem consegue editar o armazenamento pode restaurar uma cópia antiga (issue #9). |
 | **A2. Ladrão com o celular e ferramentas** (bootloader destravado, lê o armazenamento) | Copia o verificador e testa PINs offline, sem bloqueio | **Só pelo custo do KDF e pelo tamanho do PIN.** Veja os números abaixo. Um PIN de 6 dígitos cai. |
 | **A3. Host USB malicioso** | Manda comandos pela serial | **Sim.** O único comando (`REBOOT-BOOTLOADER`) só existe em imagens de teste (`bankphone.devcmd=1`); a imagem de produção não aceita nenhum. O leitor passou por fuzzing. |
 | **A4. Alguém olhando a tela** | Lê o PIN enquanto é digitado | **Não.** O teclado é fixo. |
@@ -214,7 +214,7 @@ essa mudança de interface não foi feita.
 - **O custo no celular não foi medido.** O padrão (2^15, 32 MiB) é um ponto de partida. Precisa ser
   cronometrado no X669C (`make bench-kdf` compilado para ele), mirando cerca de 0,5 a 1 s, nunca mais de
   2 s. A tela de desbloqueio **trava enquanto o KDF roda**, porque a interface tem uma thread só.
-- **O contador de tentativas erradas não é persistente** (issue #9). Sem ele, o A1 é mais fraco do que
+- **O contador de tentativas erradas só vale tanto quanto a área de estado que o guarda.** Ele é gravado a cada tentativa quando a área está armada, **não** nas imagens somente leitura, e é escrito depois da conferência e não antes (issue #9). O rollback do estado por quem edita o armazenamento offline não está resolvido. Sem isso, o A1 é mais fraco do que
   parece.
 - **Rollback do estado** por quem edita o armazenamento offline não está resolvido (issue #9).
 - **Chaves em hardware** não existem neste aparelho.
