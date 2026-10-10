@@ -217,16 +217,26 @@ static void lock_key(int k)
         if (strcmp(pin_first, p)) { pin_first[0] = 0; return; }
         uint8_t salt[16];
         plat_random(salt, 16);
-        pin_set(p, salt);
+        if (pin_set(p, salt)) {                         /* KDF failed (memory?): nothing was set / o KDF falhou (memória?): nada foi definido */
+            pin_first[0] = 0;
+            bd_log("seg: falha ao derivar o PIN (memoria). Nada foi definido.");
+            bd_flush();
+            return;
+        }
         pin_first[0] = 0;
         plat_save();
         locked = 0;
-        bd_log("seg: PIN definido e gravado (sal do kernel, SHA-256 iterado)");
+        bd_log("seg: PIN definido e gravado (sal do kernel, scrypt)");
         bd_flush();
         return;
     }
     int r = pin_check(p, plat_now());
     plat_save();
+    if (r == 3) {                                       /* KDF failed: not a wrong try, so no penalty / KDF falhou: não é erro de PIN, sem penalidade */
+        SH.msg[0] = 0;
+        bd_log("seg: falha ao derivar o PIN (memoria). Nao conta como tentativa errada.");
+        return;
+    }
     if (r != 0) {
         SH.msg[0] = 0;
         bd_log("seg: PIN errado (tentativa %d)", PIN.fails);
@@ -475,6 +485,7 @@ int ui_tick(void)
 void ui_lock(void)
 {
     locked = 1;
+    pin_forget_key();                                   /* the state key lives only while unlocked / a chave do estado só existe desbloqueado */
     sheet = SH_NONE;
     sp = 0;
     pinbuf[0] = 0; pin_len_spelhar(0); pin_first[0] = 0;
