@@ -217,7 +217,9 @@ static void lock_key(int k)
         if (strcmp(pin_first, p)) { pin_first[0] = 0; return; }
         uint8_t salt[16];
         plat_random(salt, 16);
-        if (pin_set(p, salt)) {                         /* KDF failed (memory?): nothing was set / o KDF falhou (memória?): nada foi definido */
+        int sr = pin_set(p, salt);
+        sec_wipe(p, sizeof p); sec_wipe(pin_first, sizeof pin_first); sec_wipe(salt, sizeof salt);
+        if (sr) {                                       /* KDF failed (memory?): nothing was set / o KDF falhou (memória?): nada foi definido */
             pin_first[0] = 0;
             bd_log("seg: falha ao derivar o PIN (memoria). Nada foi definido.");
             bd_flush();
@@ -231,6 +233,7 @@ static void lock_key(int k)
         return;
     }
     int r = pin_check(p, plat_now());
+    sec_wipe(p, sizeof p);                              /* the typed PIN does not stay on the stack / o PIN digitado não fica na pilha */
     plat_save();
     if (r == 3) {                                       /* KDF failed: not a wrong try, so no penalty / KDF falhou: não é erro de PIN, sem penalidade */
         SH.msg[0] = 0;

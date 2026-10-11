@@ -16,6 +16,7 @@
 #define PIN_MAXLEN       64                /* bytes of PIN/passphrase; longer is refused, never truncated */
 #define SCRYPT_MAX_MEM   (128u << 20)      /* 128 MiB hard cap on the memory a stored/parsed cost may ask for */
 #define PIN_DEFAULT_LOG2N 15               /* N = 32768, r = 8 -> 32 MiB; measure on the phone before trusting */
+#define PIN_MAX_FAILS    1000              /* the stored failed-try counter is clamped to 0..this */
 #define PIN_DEFAULT_R     8
 #define PIN_DEFAULT_P     1
 
