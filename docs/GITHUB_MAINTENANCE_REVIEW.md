@@ -160,7 +160,19 @@ núcleos. **Não é o aparelho e não é ARM64.** Comandos: `make test`, `make t
 (30 s por alvo, semente fixa). Cada branch foi testada **isolada** num `git worktree` do commit citado.
 Nível B para tudo abaixo.
 
-@@TESTS@@
+| Branch @ commit | `make test` (verificações) | `make test-asan` | `make lint` | `make fuzz` (30 s por alvo, execuções) |
+|---|---|---|---|---|
+| `main` @ `86cda6f` | 283 OK | OK | OK | devcmd 4,63 M · money 2,52 M |
+| #13 `sec/scrypt-pin-kdf` @ `60935bc` | 1202 OK (`sec` 76, `crypto_diff` 850) | OK | OK | devcmd 4,62 M · money 2,60 M · **pin 19,71 M** |
+| #14 `docs/project-audit` @ `cd02a59` | 283 OK | OK **(ver nota)** | OK | devcmd 4,64 M · money 2,58 M |
+| #15 `fix/entropy-no-weak-fallback` @ `cf94032` | 1205 OK (`entropy` 9) — **sem** os 2 commits novos do #13 | OK | OK | devcmd 4,73 M · money 2,67 M · pin 19,86 M |
+| N04 `fix/boot-b-script-slot-safety` @ `537d1ab` | 303 OK (`boot_b` 20) | OK | OK | devcmd 4,58 M · money 2,64 M |
+| N14 `fix/cmdline-exact-token-parser` @ `153e963` | 319 OK (`cmdline` 36) | OK | OK | devcmd 4,53 M · money 2,64 M · **cmdline 10,39 M** |
+| N15 `fix/state-load-validated-idempotent` @ `6f76322` | 313 OK (`money` 69, `store` 172) | OK | OK | devcmd 4,60 M · money 2,24 M |
+| `tools/publish-issues-script` @ `116a140` | 334 OK (`boot_b` 20, `publish_issues` 31) | OK | OK | devcmd 4,63 M · money 2,66 M |
+
+Todas as execuções de fuzz terminaram **sem falha**. As contagens de execuções variam de uma rodada para outra e
+não são comparáveis entre máquinas.
 
 **Limites destes números:**
 - "Verificações" são linhas `PASS` (ou o contador do próprio teste); não medem cobertura.
@@ -172,7 +184,11 @@ Nível B para tudo abaixo.
   atrapalham** (isso me deu uma falha falsa, explicada abaixo). Rode um de cada vez.
 - Nada disso foi executado no aparelho.
 
-@@NOTE_ASAN@@
+**Nota sobre o `test-asan` do #14.** Na primeira rodada em lote, o `test-asan` do #14 **falhou** no teste `store`.
+Eu estava rodando outro `make test` em paralelo na mesma máquina e o teste `store` usa o arquivo fixo
+`/tmp/bp-store-test.img`: os dois se atrapalharam. Repeti **sozinho, duas vezes**: passou nas duas (283 verificações). O
+resultado da tabela é o da repetição isolada. Isto é uma **fragilidade do teste** (caminho fixo, sem isolamento) e
+não do código; fica registrada como melhoria pequena (usar um diretório temporário por execução).
 
 ### 6.1 Como reproduzir / how to reproduce
 
