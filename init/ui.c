@@ -240,7 +240,7 @@ static void lock_key(int k)
         Tx *t = &M.tx[idx];
         Level need = m_required(t);
         if (need == L_PIN) {
-            const char *e = m_authorize(t, L_PIN, plat_now());
+            const char *e = m_authorize(t, plat_now());
             plat_save();
             if (t->st == S_AWAITING_AUTH) { snprintf(SH.msg, sizeof SH.msg, "%s", e ? e : "Não autorizado."); sheet = SH_NOTICE; return; }
             SH.rcpt = idx; SH.pend = -1; sheet = SH_RECEIPT;
@@ -281,7 +281,7 @@ static void act(int a, int arg)
     case ACT_BACK:
         if (sheet != SH_NONE && sheet != SH_AMOUNT && sheet != SH_PIN) { sheet = SH_NONE; return; }
         if (sheet == SH_AMOUNT) { sheet = SH_WHO; return; }
-        if (sheet == SH_PIN) { sheet = SH_REVIEW; return; }
+        if (sheet == SH_PIN) { auth_clear(); sheet = SH_REVIEW; return; }
         if (sp) sp--;
         return;
     case ACT_SHEET:
@@ -322,19 +322,22 @@ static void act(int a, int arg)
         if (SH.pend >= 0) { m_cancel(&M.tx[SH.pend], plat_now()); SH.pend = -1; plat_save(); }
         sheet = SH_NONE;
         return;
-    case ACT_AUTH:      SH.purpose = 0; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0); sheet = SH_PIN; return;
+    case ACT_AUTH:      SH.purpose = 0; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0);
+                        if (SH.pend >= 0) auth_expect(M.tx[SH.pend].id); else auth_clear();   /* this PIN is for THIS payment / este PIN é para ESTE pagamento */
+                        sheet = SH_PIN; return;
     case ACT_CONFIRM2: {
         int idx = SH.pend;
         if (idx < 0) { sheet = SH_NONE; return; }
         Tx *t = &M.tx[idx];
-        const char *e = m_authorize(t, m_required(t), plat_now());
+        auth_confirm(t->id, plat_now());               /* the explicit second confirmation / a segunda confirmação explícita */
+        const char *e = m_authorize(t, plat_now());
         plat_save();
         if (t->st == S_AWAITING_AUTH) { notice(e ? e : "Não autorizado."); return; }
         SH.rcpt = idx; SH.pend = -1; sheet = SH_RECEIPT;
         return; }
     case ACT_TX:        SH.rcpt = arg; sheet = SH_RECEIPT; return;
     case ACT_EMERG:
-        if (M.emergency) { SH.purpose = 1; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0); sheet = SH_PIN; }
+        if (M.emergency) { SH.purpose = 1; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0); auth_clear(); sheet = SH_PIN; }
         else { M.emergency = 1; plat_save(); bd_log("seg: MODO EMERGÊNCIA ligado (trava Pix e troca) — gravado"); bd_flush(); }
         return;
     case ACT_LOCK:      ui_lock(); return;
@@ -410,6 +413,7 @@ void ui_init(int w, int h)
     W = w; H = h;
     th_init(w, h);
     m_init();
+    auth_clear();
     memset(&PIN, 0, sizeof PIN);
     memset(&SH, 0, sizeof SH);
     SH.pend = -1; SH.rcpt = -1; SH.swap_from = A_BRL; SH.who = 0;
@@ -478,6 +482,7 @@ void ui_lock(void)
     sheet = SH_NONE;
     sp = 0;
     pinbuf[0] = 0; pin_len_spelhar(0); pin_first[0] = 0;
+    auth_clear();                                   /* a locked screen holds no authorization / tela bloqueada não guarda autorização */
     if (SH.pend >= 0) { m_cancel(&M.tx[SH.pend], plat_now()); SH.pend = -1; plat_save(); }
     bd_log("ui: tela bloqueada");
 }

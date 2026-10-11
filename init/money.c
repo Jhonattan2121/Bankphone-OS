@@ -132,15 +132,18 @@ static int64_t brl_value(const Tx *t) {
 }
 Level m_required(const Tx *t) { int64_t v = brl_value(t); return v <= M.pol.pin_max ? L_PIN : v <= M.pol.confirm_max ? L_CONFIRM : L_COOLDOWN; }
 
-const char *m_authorize(Tx *t, Level got, int64_t now) {
+const char *m_authorize(Tx *t, int64_t now) {
     if (t->st != S_AWAITING_AUTH) return "Transaction is not awaiting authorization.";
-    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); return "EMERGENCY MODE active."; }
+    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); auth_consume(t->id); return "EMERGENCY MODE active."; }
     Level need = m_required(t);
+    Level got = auth_peek(t->id, now);                 /* the proof comes from sec.c, not from the caller / a prova vem do sec.c, não do chamador */
+    if (got == L_NONE) return "Authentication required: enter your PIN.";
     if (got < need) return "Stronger authorization required.";
     if (need == L_COOLDOWN && now - t->created < M.pol.cooldown_s) return "ESPERA: aguarde antes de autorizar.";
-    if (t->type == T_SWAP) { int64_t e = pend_get(t->id); if (e < 0 || now > e) { advance(t, S_EXPIRED); pend_del(t->id); return "Quote expired. Nothing was moved."; } }
-    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); return "Insufficient balance. Nothing was moved."; }
+    if (t->type == T_SWAP) { int64_t e = pend_get(t->id); if (e < 0 || now > e) { advance(t, S_EXPIRED); pend_del(t->id); auth_consume(t->id); return "Quote expired. Nothing was moved."; } }
+    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); auth_consume(t->id); return "Insufficient balance. Nothing was moved."; }
     advance(t, S_AUTHORIZED);
+    auth_consume(t->id);                               /* single use / uso único */
     if (t->type == T_PIX_OUT) {
         if (M.pix_offline) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Pix provider unavailable. No funds moved."); return t->fail; }
         advance(t, S_CONFIRMED);                    // provedor MOCK: confirma sem mover dinheiro real
@@ -150,7 +153,7 @@ const char *m_authorize(Tx *t, Level got, int64_t now) {
     return NULL;
 }
 
-void m_cancel(Tx *t, int64_t now) { (void)now; if (allowed(t->st, S_CANCELLED)) { t->st = S_CANCELLED; pend_del(t->id); } }
+void m_cancel(Tx *t, int64_t now) { (void)now; if (allowed(t->st, S_CANCELLED)) { t->st = S_CANCELLED; pend_del(t->id); auth_consume(t->id); } }
 
 // ---- formatação ----
 void fmt_money(char *out, size_t n, int asset, int64_t v) {
