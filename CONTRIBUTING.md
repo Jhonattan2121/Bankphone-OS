@@ -16,7 +16,8 @@ You need a C compiler and `make`. Nothing else.
 make test        # builds and runs every host test, prints a summary
 make test-asan   # same, with AddressSanitizer and UndefinedBehaviorSanitizer
 make lint        # -Wall -Wextra -Werror, syntax check only
-make fuzz        # fuzzes the USB command parser and the money engine (FUZZ_TIME=30 seconds each)
+make fuzz        # fuzzes the USB command parser, the money engine and the PIN state parser (FUZZ_TIME=30 seconds each)
+make bench-kdf   # times the PIN KDF on this machine
 make clean
 ```
 
@@ -59,7 +60,8 @@ Você só precisa de um compilador C e do `make`.
 make test        # compila e roda todos os testes no computador e mostra um resumo
 make test-asan   # o mesmo, com AddressSanitizer e UndefinedBehaviorSanitizer
 make lint        # -Wall -Wextra -Werror, só checa a sintaxe
-make fuzz        # fuzzing do parser de comando USB e do motor de dinheiro (FUZZ_TIME=30 segundos cada)
+make fuzz        # fuzzing do parser de comando USB, do motor de dinheiro e do parser do estado do PIN (FUZZ_TIME=30 segundos cada)
+make bench-kdf   # mede o KDF do PIN nesta máquina
 make clean
 ```
 

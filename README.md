@@ -58,7 +58,7 @@ Run the tests (a C compiler and `make` are enough):
 make test        # money engine, security, USB command, persistent state, touch, boot display
 make test-asan   # same, with AddressSanitizer and UBSan
 make lint
-make fuzz        # fuzzes the USB command parser and the money engine
+make fuzz        # fuzzes the USB command parser, the money engine and the PIN state parser
 ```
 
 `make test` prints one line per test program and the total. See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -85,7 +85,7 @@ Render the screens to PNG with the same drawing code the phone runs:
 
 - The UI always says what is not real: `DEMO`, `NOT AVAILABLE`, `NOT IMPLEMENTED`.
 - Amounts are integer cents, never floats.
-- The PIN is a salted, iterated SHA-256 (50,000 rounds), not PBKDF2.
+- The PIN is stretched with scrypt (32 MiB per guess, RFC 7914) and split by HKDF into a verifier and a separate state key; old PINs are upgraded at the next unlock. A short PIN still does not stop an offline attack: see [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 - The device exposes a USB serial port and mounts `pstore`, so a boot that reset the phone can be read on the next boot.
 - In the safe test mode, state is not saved across reboots.
 
