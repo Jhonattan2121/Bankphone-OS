@@ -58,7 +58,7 @@ Run the tests (a C compiler and `make` are enough):
 make test        # money engine, security, USB command, persistent state, touch, boot display
 make test-asan   # same, with AddressSanitizer and UBSan
 make lint
-make fuzz        # fuzzes the USB command parser and the money engine
+make fuzz        # fuzzes the USB command parser, the money engine and the cmdline parser
 ```
 
 `make test` prints one line per test program and the total. See [CONTRIBUTING.md](CONTRIBUTING.md).

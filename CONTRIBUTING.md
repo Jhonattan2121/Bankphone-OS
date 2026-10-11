@@ -16,7 +16,7 @@ You need a C compiler and `make`. Nothing else.
 make test        # builds and runs every host test, prints a summary
 make test-asan   # same, with AddressSanitizer and UndefinedBehaviorSanitizer
 make lint        # -Wall -Wextra -Werror, syntax check only
-make fuzz        # fuzzes the USB command parser and the money engine (FUZZ_TIME=30 seconds each)
+make fuzz        # fuzzes the USB command parser, the money engine and the cmdline parser (FUZZ_TIME=30 seconds each)
 make clean
 ```
 
@@ -43,7 +43,7 @@ When the fuzzer finds a bug: fix it, add the crashing input to `tests/fuzz/corpu
 
 ### Tests for new code
 
-Put host tests in `tests/` (or `init/tests/` for the storage and display code) and add them to the `TESTS` list in the `Makefile`. Tests must run on a computer, without hardware.
+Put host tests in `tests/` (or `init/tests/` for the storage and display code) and add them to the `TESTS` list in the `Makefile`. Tests must run on a computer, without hardware. Shell scripts that call `fastboot`/`adb` are tested in `tests/scripts/<name>_test.sh` with a **fake** `fastboot` on `PATH` (list them in `SCRIPT_TESTS` in the `Makefile`); a script test must never need a phone.
 
 ---
 
@@ -59,7 +59,7 @@ Você só precisa de um compilador C e do `make`.
 make test        # compila e roda todos os testes no computador e mostra um resumo
 make test-asan   # o mesmo, com AddressSanitizer e UndefinedBehaviorSanitizer
 make lint        # -Wall -Wextra -Werror, só checa a sintaxe
-make fuzz        # fuzzing do parser de comando USB e do motor de dinheiro (FUZZ_TIME=30 segundos cada)
+make fuzz        # fuzzing do parser de comando USB, do motor de dinheiro e da cmdline (FUZZ_TIME=30 segundos cada)
 make clean
 ```
 
@@ -86,4 +86,4 @@ Quando o fuzzer achar um bug: corrija, coloque a entrada que quebrou em `tests/f
 
 ### Testes para código novo
 
-Coloque testes de computador em `tests/` (ou `init/tests/` para armazenamento e tela) e acrescente-os à lista `TESTS` do `Makefile`. Os testes precisam rodar em um computador, sem hardware.
+Coloque testes de computador em `tests/` (ou `init/tests/` para armazenamento e tela) e acrescente-os à lista `TESTS` do `Makefile`. Os testes precisam rodar em um computador, sem hardware. Scripts de shell que chamam `fastboot`/`adb` são testados em `tests/scripts/<nome>_test.sh` com um `fastboot` **falso** no `PATH` (liste em `SCRIPT_TESTS` no `Makefile`); um teste de script nunca pode precisar de um celular.

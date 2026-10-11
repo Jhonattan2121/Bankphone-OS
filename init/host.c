@@ -303,9 +303,11 @@ int main(int argc, char **argv)
     {
         const char *e = NULL;
         Tx *t = m_prepare_pix("Maria Souza", 15000, g_now - 3600 * 2, &e);
-        if (t) m_authorize(t, L_PIN, g_now - 3600 * 2 + 5);
+        /* seeding old history for the preview goes through the real path: PIN verified -> grant -> engine
+         * / o histórico antigo da prévia passa pelo caminho real: PIN conferido -> concessão -> motor */
+        if (t) { auth_expect(t->id); pin_check("123456", g_now - 3600 * 2 + 4); m_authorize(t, g_now - 3600 * 2 + 5); }
         t = m_prepare_pix("João Lima", 123450, g_now - 3600 * 26, &e);
-        if (t) m_authorize(t, L_PIN, g_now - 3600 * 26 + 5);
+        if (t) { auth_expect(t->id); pin_check("123456", g_now - 3600 * 26 + 4); m_authorize(t, g_now - 3600 * 26 + 5); }
     }
     timed_draw(__LINE__);
     snprintf(path, sizeof path, "%s/pv-4-dinheiro%s.png", outdir, modo);

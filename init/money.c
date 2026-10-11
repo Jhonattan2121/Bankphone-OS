@@ -1,4 +1,5 @@
 #include "money.h"
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -7,6 +8,7 @@ Money M;
 #define RATE 560          // DEMO: 1 USDC = R$ 5,60 (centavos por USDC)
 #define SERVICE_FEE 350   // DEMO: R$ 3,50
 #define QUOTE_TTL 20
+#define MAX_AMOUNT 1000000000000000LL   // 1e15: teto de sanidade para qualquer valor / sanity cap for any amount
 static const int64_t UNIT[A_N] = {100, 1000000};
 
 static int allowed(TxState a, TxState b) {
@@ -62,6 +64,9 @@ void m_load_demo(int64_t now) {
 }
 
 Tx *m_receive_pix(int64_t cents, const char *from, int64_t now) {
+    // O motor não confia no chamador: zero criaria uma transação vazia e negativo viraria um débito disfarçado.
+    // The engine does not trust the caller: zero would create an empty transaction and a negative would be a hidden debit.
+    if (cents <= 0 || cents > MAX_AMOUNT) return NULL;
     char k[48]; snprintf(k, sizeof k, "in-%lld-%u", (long long)now, ++M.seq);
     Tx *t = add(T_PIX_IN, k, now, A_NONE, 0, A_BRL, cents, 0, from);
     if (t) { advance(t, S_AUTHORIZED); advance(t, S_CONFIRMED); }
@@ -127,15 +132,18 @@ static int64_t brl_value(const Tx *t) {
 }
 Level m_required(const Tx *t) { int64_t v = brl_value(t); return v <= M.pol.pin_max ? L_PIN : v <= M.pol.confirm_max ? L_CONFIRM : L_COOLDOWN; }
 
-const char *m_authorize(Tx *t, Level got, int64_t now) {
+const char *m_authorize(Tx *t, int64_t now) {
     if (t->st != S_AWAITING_AUTH) return "Transaction is not awaiting authorization.";
-    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); return "EMERGENCY MODE active."; }
+    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); auth_consume(t->id); return "EMERGENCY MODE active."; }
     Level need = m_required(t);
+    Level got = auth_peek(t->id, now);                 /* the proof comes from sec.c, not from the caller / a prova vem do sec.c, não do chamador */
+    if (got == L_NONE) return "Authentication required: enter your PIN.";
     if (got < need) return "Stronger authorization required.";
     if (need == L_COOLDOWN && now - t->created < M.pol.cooldown_s) return "ESPERA: aguarde antes de autorizar.";
-    if (t->type == T_SWAP) { int64_t e = pend_get(t->id); if (e < 0 || now > e) { advance(t, S_EXPIRED); pend_del(t->id); return "Quote expired. Nothing was moved."; } }
-    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); return "Insufficient balance. Nothing was moved."; }
+    if (t->type == T_SWAP) { int64_t e = pend_get(t->id); if (e < 0 || now > e) { advance(t, S_EXPIRED); pend_del(t->id); auth_consume(t->id); return "Quote expired. Nothing was moved."; } }
+    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); auth_consume(t->id); return "Insufficient balance. Nothing was moved."; }
     advance(t, S_AUTHORIZED);
+    auth_consume(t->id);                               /* single use / uso único */
     if (t->type == T_PIX_OUT) {
         if (M.pix_offline) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Pix provider unavailable. No funds moved."); return t->fail; }
         advance(t, S_CONFIRMED);                    // provedor MOCK: confirma sem mover dinheiro real
@@ -145,7 +153,7 @@ const char *m_authorize(Tx *t, Level got, int64_t now) {
     return NULL;
 }
 
-void m_cancel(Tx *t, int64_t now) { (void)now; if (allowed(t->st, S_CANCELLED)) { t->st = S_CANCELLED; pend_del(t->id); } }
+void m_cancel(Tx *t, int64_t now) { (void)now; if (allowed(t->st, S_CANCELLED)) { t->st = S_CANCELLED; pend_del(t->id); auth_consume(t->id); } }
 
 // ---- formatação ----
 void fmt_money(char *out, size_t n, int asset, int64_t v) {
@@ -161,35 +169,97 @@ void fmt_money(char *out, size_t n, int asset, int64_t v) {
 int64_t parse_cents(const char *d) { int64_t v = 0; for (; *d; d++) { if (*d < '0' || *d > '9') return -1; v = v * 10 + (*d - '0'); if (v > 100000000000LL) return -1; } return v; }
 
 // ---- persistência (texto, uma tx por linha) ----
+// Campos de texto não podem conter '|' nem quebra de linha: eles quebrariam o formato. Trocamos por espaço.
+// Text fields must not hold '|' or a newline: they would break the format. We replace them with a space.
+static void clean_field(char *dst, size_t n, const char *src) {
+    size_t i = 0;
+    for (; src[i] && i + 1 < n; i++) dst[i] = (src[i] == '|' || src[i] == '\n' || src[i] == '\r') ? ' ' : src[i];
+    dst[i] = 0;
+}
 size_t m_serialize(char *buf, size_t cap) {
     size_t o = 0;
     o += snprintf(buf + o, cap - o, "V1 %u %d\n", M.seq, M.emergency);
     for (int i = 0; i < M.n && o + 400 < cap; i++) {
         Tx *t = &M.tx[i];
+        char cp[sizeof t->cp], fail[sizeof t->fail], hash[sizeof t->hash];
+        clean_field(cp, sizeof cp, t->cp); clean_field(fail, sizeof fail, t->fail); clean_field(hash, sizeof hash, t->hash);
         o += snprintf(buf + o, cap - o, "T|%s|%s|%d|%d|%d|%d|%lld|%lld|%lld|%lld|%s|%s|%s\n", t->id, t->idem, t->type, t->st, t->from, t->to,
-                      (long long)t->from_amt, (long long)t->to_amt, (long long)t->fee_brl, (long long)t->created, t->cp, t->fail, t->hash);
+                      (long long)t->from_amt, (long long)t->to_amt, (long long)t->fee_brl, (long long)t->created, cp, fail, hash);
     }
     return o;
 }
+
+// m_deserialize é TUDO-OU-NADA: se qualquer linha for inválida, o livro-razão fica VAZIO (m_init) e o motivo
+// fica em m_deserialize_error(). Antes, as linhas ruins eram puladas e as boas entravam: um estado corrompido
+// virava um saldo plausível. Valida versão, campos, faixas, coerência de moedas e saldo final.
+// m_deserialize is ALL-OR-NOTHING: if any line is invalid, the ledger stays EMPTY (m_init) and the reason is
+// in m_deserialize_error(). Before, bad lines were skipped and good ones kept: a corrupted state turned into
+// a plausible balance. It checks the version, the fields, the ranges, the currency coherence and the final balance.
+#define MAX_TIME   100000000000LL              // ~ano 5138 / ~year 5138
+static char des_err[96];
+const char *m_deserialize_error(void) { return des_err; }
+static int des_fail(const char *msg, int line) { snprintf(des_err, sizeof des_err, "linha %d: %s", line, msg); m_init(); return 0; }
+
+static int num(const char *s, long long lo, long long hi, long long *out) {
+    if (!(s[0] == '-' ? (s[1] >= '0' && s[1] <= '9') : (s[0] >= '0' && s[0] <= '9'))) return 0;   // sem espaço, sem '+', sem vazio
+    char *e = NULL; errno = 0; long long v = strtoll(s, &e, 10);
+    if (errno || *e || v < lo || v > hi) return 0;
+    *out = v; return 1;
+}
+
 int m_deserialize(const char *buf) {
+    des_err[0] = 0;
     m_init();
-    char *b = strdup(buf), *sv = NULL; int ok = 1;
-    for (char *l = strtok_r(b, "\n", &sv); l; l = strtok_r(NULL, "\n", &sv)) {
-        if (l[0] == 'V') { unsigned s; int e; if (sscanf(l, "V1 %u %d", &s, &e) == 2) { M.seq = s; M.emergency = e; } else ok = 0; continue; }
-        if (l[0] != 'T' || !l[1] || M.n >= MAX_TX) continue;   // lone "T" line: l + 2 would pass the end of the string / linha "T" sozinha: l + 2 passaria do fim da string
+    char *b = strdup(buf ? buf : "");
+    if (!b) return des_fail("sem memória", 0);
+    char *sv = NULL; int line = 0, have_head = 0, rc = 1;
+    for (char *l = strtok_r(b, "\n", &sv); l && rc; l = strtok_r(NULL, "\n", &sv)) {
+        line++;
+        if (l[0] == 'V') {
+            if (have_head) { rc = des_fail("cabeçalho repetido", line); break; }
+            if (line != 1) { rc = des_fail("cabeçalho fora do começo", line); break; }
+            unsigned sq; int em, pos = 0;
+            if (strncmp(l, "V1 ", 3)) { rc = des_fail("versão do estado desconhecida", line); break; }
+            if (sscanf(l, "V1 %u %d %n", &sq, &em, &pos) != 2 || l[pos] || (em != 0 && em != 1)) { rc = des_fail("cabeçalho V1 inválido", line); break; }
+            M.seq = sq; M.emergency = em; have_head = 1; continue;
+        }
+        if (!have_head) { rc = des_fail("falta o cabeçalho V1", line); break; }
+        if (l[0] != 'T' || l[1] != '|') { rc = des_fail("linha desconhecida", line); break; }
+        if (M.n >= MAX_TX) { rc = des_fail("mais transações do que o limite", line); break; }
+
+        char *f[13]; int k = 0; f[k++] = l + 2;
+        for (char *p = l + 2; *p; p++) if (*p == '|') { if (k == 13) { k = 14; break; } *p = 0; f[k++] = p + 1; }
+        if (k != 13) { rc = des_fail("número de campos errado", line); break; }
+
+        long long ty, st, from, to, fa, ta, fee, cr;
+        if (!num(f[2], 0, 3, &ty) || !num(f[3], 0, 10, &st)) { rc = des_fail("tipo ou estado fora da faixa", line); break; }
+        if (!num(f[4], -1, 1, &from) || !num(f[5], -1, 1, &to)) { rc = des_fail("moeda inválida", line); break; }
+        if (!num(f[6], 0, MAX_AMOUNT, &fa) || !num(f[7], 0, MAX_AMOUNT, &ta) || !num(f[8], 0, MAX_AMOUNT, &fee)) { rc = des_fail("valor fora da faixa", line); break; }
+        if (!num(f[9], 0, MAX_TIME, &cr)) { rc = des_fail("data fora da faixa", line); break; }
+
         Tx *t = &M.tx[M.n]; memset(t, 0, sizeof *t);
-        char id[16], idem[64], cp[48], fail[100], hash[80]; int ty, st, f, to; long long fa, ta, fee, cr;
-        char *p = l + 2; char *f_[13]; int k = 0; f_[k++] = p;
-        for (; *p && k < 13; p++) if (*p == '|') { *p = 0; f_[k++] = p + 1; }
-        (void)id; (void)idem; (void)cp; (void)fail; (void)hash;
-        if (k < 13) { ok = 0; continue; }
-        snprintf(t->id, sizeof t->id, "%s", f_[0]); snprintf(t->idem, sizeof t->idem, "%s", f_[1]);
-        ty = atoi(f_[2]); st = atoi(f_[3]); f = atoi(f_[4]); to = atoi(f_[5]); fa = atoll(f_[6]); ta = atoll(f_[7]); fee = atoll(f_[8]); cr = atoll(f_[9]);
-        snprintf(t->cp, sizeof t->cp, "%s", f_[10]); snprintf(t->fail, sizeof t->fail, "%s", f_[11]); snprintf(t->hash, sizeof t->hash, "%s", f_[12]);
-        if (ty < 0 || ty > 3 || st < 0 || st > 10) { ok = 0; continue; }
-        t->type = ty; t->st = st; t->from = f; t->to = to; t->from_amt = fa; t->to_amt = ta; t->fee_brl = fee; t->created = cr; M.n++;
+        if (strlen(f[0]) >= sizeof t->id || strlen(f[1]) >= sizeof t->idem || strlen(f[10]) >= sizeof t->cp ||
+            strlen(f[11]) >= sizeof t->fail || strlen(f[12]) >= sizeof t->hash || !f[0][0] || !f[1][0]) { rc = des_fail("texto longo demais ou id vazio", line); break; }
+        // coerência entre tipo e moedas / currency coherence per type
+        int ok = (ty == T_FUNDING) ? (from == A_NONE && (to == A_BRL || to == A_USDC))
+               : (ty == T_PIX_IN)  ? (from == A_NONE && to == A_BRL)
+               : (ty == T_PIX_OUT) ? (from == A_BRL && to == A_NONE)
+               :                     ((from == A_BRL || from == A_USDC) && (to == A_BRL || to == A_USDC) && from != to);
+        if (!ok) { rc = des_fail("moedas incoerentes com o tipo", line); break; }
+        if ((from == A_NONE) != (fa == 0) || (to == A_NONE) != (ta == 0)) { rc = des_fail("valor incoerente com a moeda", line); break; }
+        for (int i = 0; i < M.n; i++) if (!strcmp(M.tx[i].idem, f[1])) { rc = des_fail("chave de idempotência repetida", line); break; }
+        if (!rc) break;
+
+        snprintf(t->id, sizeof t->id, "%s", f[0]); snprintf(t->idem, sizeof t->idem, "%s", f[1]);
+        snprintf(t->cp, sizeof t->cp, "%s", f[10]); snprintf(t->fail, sizeof t->fail, "%s", f[11]); snprintf(t->hash, sizeof t->hash, "%s", f[12]);
+        t->type = (TxType)ty; t->st = (TxState)st; t->from = (int)from; t->to = (int)to;
+        t->from_amt = fa; t->to_amt = ta; t->fee_brl = fee; t->created = cr; M.n++;
         // transação interrompida (app caiu antes de concluir) nunca fica "viva": expira
         if (t->st == S_AWAITING_AUTH || t->st == S_QUOTED || t->st == S_CREATED) t->st = S_EXPIRED;
     }
-    free(b); return ok;
+    free(b);
+    if (!rc) return 0;
+    if (!have_head) return des_fail("estado sem cabeçalho", 1);
+    if (m_balance(A_BRL) < 0 || m_balance(A_USDC) < 0) return des_fail("saldo final negativo", line);
+    return 1;
 }

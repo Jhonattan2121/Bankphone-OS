@@ -20,7 +20,7 @@ ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-
 
 # Test name -> sources and flags (same commands as the README).
 # Nome do teste -> fontes e flags (os mesmos comandos do README).
-TESTS := money sec devcmd store lockgeom
+TESTS := money sec devcmd store cmdline lockgeom
 
 # touchcore and bootdiag_fb include Linux-only headers (linux/input.h, linux/fb.h), so they
 # only build on Linux. Everything else builds on macOS too.
@@ -33,11 +33,12 @@ else
 $(info note: touchcore and bootdiag_fb need Linux headers and are skipped on $(UNAME) / precisam de headers do Linux e foram puladas no $(UNAME))
 endif
 
-SRC_money       := tests/money_test.c init/money.c
+SRC_money       := tests/money_test.c init/money.c init/sec.c
 LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
 SRC_devcmd      := tests/devcmd_test.c
+SRC_cmdline     := tests/cmdline_test.c
 SRC_lockgeom    := tests/lockgeom_test.c
 FLAGS_lockgeom  := -Iinit
 SRC_store       := init/tests/test_store.c init/store.c init/sec.c
@@ -46,6 +47,10 @@ LIBS_store      := -lm
 SRC_touchcore   := init/tests/test_touchcore.c
 SRC_bootdiag_fb := init/tests/test_bootdiag_fb.c init/bootdiag.c
 FLAGS_bootdiag_fb := -Iinit
+
+# Testes de script (shell): tests/scripts/<nome>_test.sh, com programas externos FALSOS no PATH.
+# Shell-script tests: tests/scripts/<name>_test.sh, with FAKE external programs on PATH.
+SCRIPT_TESTS := boot_b
 
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
@@ -76,12 +81,14 @@ $(BUILD):
 # Each test prints in its own way; here we only count how many checks passed.
 # Cada teste imprime do seu jeito; aqui só se conta quantas verificações passaram.
 test: $(BINS)
+	@mkdir -p $(BUILD)
 	@fail=0; total=0; \
-	for t in $(TESTS); do \
+	for t in $(TESTS) $(SCRIPT_TESTS); do \
 	  log=$(BUILD)/$$t.log; \
-	  if $(BUILD)/$$t > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
+	  case " $(SCRIPT_TESTS) " in *" $$t "*) cmd="sh tests/scripts/$${t}_test.sh" ;; *) cmd="$(BUILD)/$$t" ;; esac; \
+	  if $$cmd > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
 	  n=; case $$t in \
-	    money|sec|devcmd|lockgeom) n=$$(grep -c '^PASS' $$log) ;; \
+	    money|sec|devcmd|cmdline|lockgeom|boot_b) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
@@ -102,6 +109,10 @@ lint:
 ifeq ($(UNAME),Linux)
 	$(CC) $(LINT_FLAGS) $(LINT_DEVICE)
 endif
+	@# The authorization test hook must exist only in the test and fuzz builds of this Makefile.
+	@# O gancho de teste da autorização só pode existir nos builds de teste e fuzz deste Makefile.
+	@if grep -rn -e 'BANKPHONE_AUTH_TEST' build.sh install.sh scripts .github init/main.c init/ui.c init/hw.c init/money.c init/store.c; then \
+	  echo "ERRO: BANKPHONE_AUTH_TEST aparece fora dos testes / BANKPHONE_AUTH_TEST outside the tests"; exit 1; fi
 	@echo "lint OK"
 
 lint-strict:
@@ -117,7 +128,7 @@ lint-strict:
 # falha se repete. Com clang também dá para usar o libFuzzer: make fuzz FUZZ_ENGINE=libfuzzer
 FUZZ_TIME   ?= 30
 FUZZ_ENGINE ?= driver
-FUZZ_TARGETS := devcmd money
+FUZZ_TARGETS := devcmd money cmdline
 FUZZ_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 ifeq ($(FUZZ_ENGINE),libfuzzer)
 FUZZ_CC     := clang
@@ -132,17 +143,19 @@ FUZZ_RUN     = build/fuzz/fuzz_$(1) $(FUZZ_TIME) tests/fuzz/corpus/$(1)
 endif
 
 SRC_fuzz_devcmd := tests/fuzz/fuzz_devcmd.c
-SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c
+SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c init/sec.c
+FLAGS_fuzz_money := -DBANKPHONE_AUTH_TEST
+SRC_fuzz_cmdline := tests/fuzz/fuzz_cmdline.c
 LIBS_fuzz_money := -lm
 
 build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 	@mkdir -p build/fuzz
-	$(FUZZ_CC) $(FUZZ_FLAGS) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
+	$(FUZZ_CC) $(FUZZ_FLAGS) $(FLAGS_fuzz_$*) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
 
 fuzz: $(addprefix build/fuzz/fuzz_,$(FUZZ_TARGETS))
 	@for f in $(FUZZ_TARGETS); do \
 	  echo "== fuzz_$$f ($(FUZZ_TIME)s, $(FUZZ_ENGINE))"; \
-	  case $$f in devcmd) $(call FUZZ_RUN,devcmd) ;; money) $(call FUZZ_RUN,money) ;; esac || exit 1; \
+	  $(call FUZZ_RUN,$$f) || exit 1; \
 	done
 
 clean:
