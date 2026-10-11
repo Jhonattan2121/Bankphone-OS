@@ -108,6 +108,24 @@ int main(void) {
       { char sv[200000]; m_serialize(sv, sizeof sv);
         CHECK("estado valido continua sendo aceito", m_deserialize(sv) && M.n > 0); } }
 
+    /* ---- loading is idempotent, and a state cut at ANY byte is accepted whole or refused whole ----
+     * ---- carregar é idempotente, e um estado cortado em QUALQUER byte é aceito inteiro ou recusado inteiro ---- */
+    { static char sv[200000], cut[200000];
+      m_init(); m_load_demo(now); m_serialize(sv, sizeof sv);
+      int ok1 = m_deserialize(sv); int n1 = M.n; int64_t b1 = m_balance(A_BRL), u1 = m_balance(A_USDC);
+      int ok2 = m_deserialize(sv);
+      CHECK("carregar duas vezes o mesmo estado da o mesmo resultado",
+            ok1 && ok2 && M.n == n1 && m_balance(A_BRL) == b1 && m_balance(A_USDC) == u1);
+      size_t len = strlen(sv); int bad_cut = 0, accepted = 0, refused = 0;
+      for (size_t k = 0; k < len; k++) {
+          memcpy(cut, sv, k); cut[k] = 0;
+          int ok = m_deserialize(cut);
+          if (ok) { accepted++; if (m_balance(A_BRL) < 0 || m_balance(A_USDC) < 0 || M.n > MAX_TX) bad_cut++; }
+          else { refused++; if (M.n != 0 || !m_deserialize_error()[0]) bad_cut++; }
+      }
+      CHECK("estado cortado em cada byte: aceito inteiro ou recusado vazio, com motivo", bad_cut == 0 && refused > 0);
+      (void)accepted; }
+
     m_deserialize("V1 1 0\n");
     fmt_money(b, sizeof b, A_BRL, 1248032); CHECK("format BRL", !strcmp(b, "R$ 12.480,32"));
     fmt_money(b, sizeof b, A_USDC, 177946428); CHECK("format USDC", !strcmp(b, "$ 177.94"));
