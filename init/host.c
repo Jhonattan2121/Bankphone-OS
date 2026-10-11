@@ -31,6 +31,7 @@
 #include "hw.h"
 #include "store.h"
 #include "bootdiag.h"
+#include "entropy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,8 @@ static int64_t g_now = 1759468800;              /* 2025-10-03 00:00 UTC */
 static int g_clock = 1;
 int64_t plat_now(void) { return g_now; }
 int plat_clock_valid(void) { return g_clock; }
-void plat_random(uint8_t *b, int n) { for (int i = 0; i < n; i++) b[i] = (uint8_t)(rand() & 255); }
+/* Simulator only: real entropy too, so the previews exercise the same failure path. / Só simulador: aleatoriedade real também. */
+int plat_random(uint8_t *b, int n) { return n < 0 ? -1 : entropy_fill(b, (size_t)n); }
 void plat_save(void) {}
 int plat_persist_ok(void) { return 0; }
 const char *plat_boot_prop(const char *k)
@@ -283,7 +285,7 @@ int main(int argc, char **argv)
     /* 2. bloqueio com PIN já definido */
     {
         uint8_t salt[16];
-        plat_random(salt, 16);
+        if (plat_random(salt, 16) != 0) { fprintf(stderr, "sem aleatoriedade\n"); exit(1); }
         pin_set("123456", salt);
         ui_lock();
         timed_draw(__LINE__);

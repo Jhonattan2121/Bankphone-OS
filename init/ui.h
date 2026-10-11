@@ -5,7 +5,7 @@
 // ---- ganchos de plataforma (implementados em main.c no celular e em host.c no Mac) ----
 int64_t plat_now(void);                         // segundos (relógio real se válido, senão uptime)
 int     plat_clock_valid(void);                 // 1 se plat_now é hora real
-void    plat_random(uint8_t *b, int n);
+int     plat_random(uint8_t *b, int n);        // 0 ok · -1 sem aleatoriedade segura (nunca devolve bytes previsíveis)
 void    plat_save(void);                        // persistir Money + PIN agora
 int     plat_persist_ok(void);                  // 1 se a gravação persistente funciona
 const char *plat_boot_prop(const char *key);    // valor da linha de comando do kernel ou "" se ausente
