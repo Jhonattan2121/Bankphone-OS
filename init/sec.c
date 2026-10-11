@@ -3,6 +3,33 @@
 #include <string.h>
 
 Pin PIN;
+
+/* ---- authorization grant / concessão de autorização ---- */
+static struct { char id[16]; Level lvl; int64_t at; int live; } G;
+static char g_expect[16];
+static void grant_wipe(void) { memset(&G, 0, sizeof G); }
+static void auth_on_pin_ok(int64_t now);
+void auth_clear(void) { grant_wipe(); memset(g_expect, 0, sizeof g_expect); }
+void auth_expect(const char *tx_id) {
+    grant_wipe(); memset(g_expect, 0, sizeof g_expect);                 /* a new expectation drops the old grant / uma nova expectativa descarta a concessão anterior */
+    if (tx_id && tx_id[0] && strlen(tx_id) < sizeof g_expect) snprintf(g_expect, sizeof g_expect, "%s", tx_id);
+}
+static void auth_on_pin_ok(int64_t now) {
+    if (!g_expect[0]) return;                                           /* a PIN typed with no payment waiting (lock screen) authorises nothing / PIN sem pagamento esperando (tela de bloqueio) não autoriza nada */
+    grant_wipe(); snprintf(G.id, sizeof G.id, "%s", g_expect); G.lvl = L_PIN; G.at = now; G.live = 1;
+    memset(g_expect, 0, sizeof g_expect);
+}
+static int grant_ok(const char *tx_id, int64_t now) {
+    if (!G.live || !tx_id || strcmp(G.id, tx_id)) return 0;
+    if (now < G.at || now - G.at > AUTH_TTL_S) { grant_wipe(); return 0; }   /* expired, or the clock went backwards / vencida, ou o relógio voltou */
+    return 1;
+}
+int   auth_confirm(const char *tx_id, int64_t now) { if (!grant_ok(tx_id, now)) return 0; G.lvl = L_COOLDOWN; return 1; }
+Level auth_peek(const char *tx_id, int64_t now) { return grant_ok(tx_id, now) ? G.lvl : L_NONE; }
+void  auth_consume(const char *tx_id) { if (G.live && tx_id && !strcmp(G.id, tx_id)) grant_wipe(); }
+#ifdef BANKPHONE_AUTH_TEST
+void  auth_test_mint(const char *tx_id, Level lvl, int64_t now) { grant_wipe(); snprintf(G.id, sizeof G.id, "%s", tx_id); G.lvl = lvl; G.at = now; G.live = 1; }
+#endif
 static const uint32_t K[64] = {
  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
@@ -46,7 +73,7 @@ int pin_check(const char *pin, int64_t now) {
     if (now < PIN.locked_until) return 2;
     uint8_t h[32]; pin_derive(pin, PIN.salt, h);
     uint8_t diff = 0; for (int i = 0; i < 32; i++) diff |= h[i] ^ PIN.hash[i];
-    if (!diff) { PIN.fails = 0; return 0; }
+    if (!diff) { PIN.fails = 0; auth_on_pin_ok(now); return 0; }   /* the ONLY place a grant is issued / o ÚNICO lugar que emite concessão */
     if (++PIN.fails >= 5) { int e = PIN.fails - 5; if (e > 6) e = 6; PIN.locked_until = now + 30 * (1 << e); }
     return 1;
 }

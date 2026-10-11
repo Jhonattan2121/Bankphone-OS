@@ -33,7 +33,7 @@ else
 $(info note: touchcore and bootdiag_fb need Linux headers and are skipped on $(UNAME) / precisam de headers do Linux e foram puladas no $(UNAME))
 endif
 
-SRC_money       := tests/money_test.c init/money.c
+SRC_money       := tests/money_test.c init/money.c init/sec.c
 LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
@@ -100,6 +100,10 @@ lint:
 ifeq ($(UNAME),Linux)
 	$(CC) $(LINT_FLAGS) $(LINT_DEVICE)
 endif
+	@# The authorization test hook must exist only in the test and fuzz builds of this Makefile.
+	@# O gancho de teste da autorização só pode existir nos builds de teste e fuzz deste Makefile.
+	@if grep -rn -e 'BANKPHONE_AUTH_TEST' build.sh install.sh scripts .github init/main.c init/ui.c init/hw.c init/money.c init/store.c; then \
+	  echo "ERRO: BANKPHONE_AUTH_TEST aparece fora dos testes / BANKPHONE_AUTH_TEST outside the tests"; exit 1; fi
 	@echo "lint OK"
 
 lint-strict:
@@ -130,12 +134,13 @@ FUZZ_RUN     = build/fuzz/fuzz_$(1) $(FUZZ_TIME) tests/fuzz/corpus/$(1)
 endif
 
 SRC_fuzz_devcmd := tests/fuzz/fuzz_devcmd.c
-SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c
+SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c init/sec.c
+FLAGS_fuzz_money := -DBANKPHONE_AUTH_TEST
 LIBS_fuzz_money := -lm
 
 build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 	@mkdir -p build/fuzz
-	$(FUZZ_CC) $(FUZZ_FLAGS) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
+	$(FUZZ_CC) $(FUZZ_FLAGS) $(FLAGS_fuzz_$*) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
 
 fuzz: $(addprefix build/fuzz/fuzz_,$(FUZZ_TARGETS))
 	@for f in $(FUZZ_TARGETS); do \
