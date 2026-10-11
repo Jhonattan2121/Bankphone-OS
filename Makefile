@@ -20,7 +20,7 @@ ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-
 
 # Test name -> sources and flags (same commands as the README).
 # Nome do teste -> fontes e flags (os mesmos comandos do README).
-TESTS := money sec devcmd store
+TESTS := money sec devcmd store lockgeom
 
 # touchcore and bootdiag_fb include Linux-only headers (linux/input.h, linux/fb.h), so they
 # only build on Linux. Everything else builds on macOS too.
@@ -38,6 +38,8 @@ LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
 SRC_devcmd      := tests/devcmd_test.c
+SRC_lockgeom    := tests/lockgeom_test.c
+FLAGS_lockgeom  := -Iinit
 SRC_store       := init/tests/test_store.c init/store.c init/sec.c
 FLAGS_store     := -DBANKPHONE_STORE_TEST
 LIBS_store      := -lm
@@ -78,8 +80,8 @@ test: $(BINS)
 	for t in $(TESTS); do \
 	  log=$(BUILD)/$$t.log; \
 	  if $(BUILD)/$$t > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
-	  case $$t in \
-	    money|sec|devcmd) n=$$(grep -c '^PASS' $$log) ;; \
+	  n=; case $$t in \
+	    money|sec|devcmd|lockgeom) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \

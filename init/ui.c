@@ -19,6 +19,7 @@
 #include "sec.h"
 #include "hw.h"
 #include "bootdiag.h"
+#include "lockgeom.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -184,11 +185,11 @@ static void lock_draw(void)
         snprintf(f, sizeof f, "%d tentativa(s) errada(s)", PIN.fails);
         comp_label_c(th_W / 2, y, f, TH_BAD, TH_DP(TH_F_XS), TH_W_REG);
     }
-    y = th_H - TH_DP(TH_SP4) - (4 * TH_DP(TH_H_TECLA) + 3 * TH_DP(TH_SP3));
-    comp_keypad(th_cx(), y, th_cw());
+    const LockGeom lg = lock_geom();                /* the keypad ends above the footer (issue #18) / o teclado termina acima do rodapé (issue #18) */
+    comp_keypad(th_cx(), lg.keypad_y, th_cw());
 
     /* aviso honesto do rodapé: o sistema todo é demonstração */
-    comp_label_c(th_W / 2, th_H - TH_DP(TH_SP5), "nada aqui é dinheiro real", TH_TXT3, TH_DP(TH_F_CAPS), TH_W_REG);
+    comp_label_c(th_W / 2, lg.footer_y, "nada aqui é dinheiro real", TH_TXT3, TH_DP(TH_F_CAPS), TH_W_REG);
 }
 
 /* A folha do PIN (sheets.c) desenha SH.pin_len, não o pin_len daqui. Sem esta
