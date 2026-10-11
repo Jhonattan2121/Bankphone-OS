@@ -30,7 +30,7 @@ Cada afirmação deste documento tem um destes níveis. **Um nível mais alto n�
 |---|---|---|
 | **A. Verificado no código** | Eu li o código e o comportamento decorre dele | "`pin_check` devolve 3 se o scrypt falha" |
 | **B. Verificado por testes no host** | Um teste ou experimento rodou **num PC** (container Linux x86_64) | "76 verificações do `sec_test` passam" |
-| **C. Verificado em hardware real** | Evidência arquivada vinda do Infinix Hot 30i X669C | **nenhuma neste momento** |
+| **C. Verificado em hardware real** | Evidência **arquivada** (log, foto, captura) vinda do Infinix Hot 30i X669C | **nenhuma neste momento**. O README da `main` registra, **sem arquivo de evidência**, que o comando USB reiniciou um X669C no fastboot e que o `fastboot fetch` foi recusado (relatado pelo autor, commit `c2bd14d`) |
 | **D. Planejado, não implementado ou não comprovado** | Existe como intenção, rascunho ou hipótese | "N02: provar o fallback A/B" |
 
 Regra: **CI verde, compilação e testes de host não provam que o sistema inicia ou funciona no aparelho.** Quando o
@@ -41,7 +41,7 @@ repositório"**, que não é o nível C.
 
 | Item | Valor |
 |---|---|
-| Commit | `86cda6f` — *build: skip the Linux-only tests and lint targets on macOS* |
+| Commit | **`f80968d`** — *feat: real screenshots over USB, bilingual installer*. A revisão e os testes das seções 2–7 foram feitos sobre `86cda6f`; a `main` depois recebeu **2 commits do autor** (`c2bd14d` instalador e README com o que foi conferido num X669C; `f80968d` comandos `SCREENSHOT`/`TOUCH`, `tools/screenshot.py`, instalador bilíngue). Todos os merges abaixo foram **simulados sobre `f80968d`** (seção 10.1) |
 | Conteúdo | Código C do sistema (`init/`), testes de host, Makefile e CI (PR #12 já integrado), CONTRIBUTING, scripts |
 | CI da `main` | Linux: `make test`, `make test-asan`, `make lint`, `make fuzz FUZZ_TIME=20`. macOS: `make test`, `make lint` (sem os testes e lint só de Linux) |
 | Testes da `main` | 283 verificações, ASan/UBSan e lint passam (ver seção 6) |
@@ -273,6 +273,21 @@ destrutivo; conflito se resolve com merge da `main` na branch.
 
 Se preferir priorizar risco concreto: **N04, N14 e N15** primeiro (gravação de partição, interpretação de parâmetros
 de boot, integridade do estado), em paralelo com a revisão do #13.
+
+### 10.1 Simulação dos merges sobre a `main` atual (`f80968d`)
+
+Feita **localmente**, num `git worktree` descartável, **sem publicar nada**: cada branch sozinha e depois todas em sequência.
+
+- **Cada branch sozinha sobre `f80968d`:** merge limpo, sem conflito, as 9.
+- **Em sequência** (ordem da tabela acima, com a N07 antes desta revisão): **conflitos**, todos previstos, todos em arquivos de lista:
+  1. `Makefile` ao juntar a N04 depois do #15 (lista de testes e laço do `make test`);
+  2. `Makefile` ao juntar o script de publicação (lista de testes);
+  3. `Makefile`, `README.md` e `CONTRIBUTING.md` ao juntar a N14 (alvos de teste e de fuzz; texto da lista de fuzzers);
+  4. **N07 × #13**: `init/sec.c`, `init/sec.h`, `init/ui.c`, `Makefile` — as duas mexem no `pin_check` e nas mesmas linhas de limpar o PIN.
+- **Resolução:** união das duas listas em cada conflito; no `pin_check` ficou a versão do #13 com a chamada que emite a concessão; na UI ficaram as limpezas do #13 mais `auth_expect`/`auth_clear` da N07. Nenhuma lógica foi descartada.
+- **Resultado do conjunto integrado** (todas as branches mais os 2 commits novos da `main`): `make test` **1375 verificações OK**, `make test-asan` OK, `make lint` OK, `make fuzz` 20 s por alvo (devcmd, money, pin, cmdline) **sem falha**.
+- **O que isso não prova:** é a **minha** resolução, feita no computador, e **não substitui** a revisão de cada diff nem o CI do GitHub; o macOS não foi simulado; nada rodou no aparelho.
+- **Consequência prática:** a cada merge no GitHub, as branches seguintes podem ficar com conflito e o GitHub vai pedir resolução. Resolver com merge da `main` na branch (nunca force push). Se você preferir, eu faço esses merges nas branches antes de você clicar.
 
 ## 11. Próxima ação recomendada por item
 
