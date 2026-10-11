@@ -33,7 +33,7 @@ else
 $(info note: touchcore and bootdiag_fb need Linux headers and are skipped on $(UNAME) / precisam de headers do Linux e foram puladas no $(UNAME))
 endif
 
-SRC_money       := tests/money_test.c init/money.c
+SRC_money       := tests/money_test.c init/money.c init/sec.c
 LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
@@ -45,6 +45,10 @@ LIBS_store      := -lm
 SRC_touchcore   := init/tests/test_touchcore.c
 SRC_bootdiag_fb := init/tests/test_bootdiag_fb.c init/bootdiag.c
 FLAGS_bootdiag_fb := -Iinit
+
+# Testes de script (shell): tests/scripts/<nome>_test.sh, com programas externos FALSOS no PATH.
+# Shell-script tests: tests/scripts/<name>_test.sh, with FAKE external programs on PATH.
+SCRIPT_TESTS := boot_b
 
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
@@ -75,12 +79,14 @@ $(BUILD):
 # Each test prints in its own way; here we only count how many checks passed.
 # Cada teste imprime do seu jeito; aqui só se conta quantas verificações passaram.
 test: $(BINS)
+	@mkdir -p $(BUILD)
 	@fail=0; total=0; \
-	for t in $(TESTS); do \
+	for t in $(TESTS) $(SCRIPT_TESTS); do \
 	  log=$(BUILD)/$$t.log; \
-	  if $(BUILD)/$$t > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
+	  case " $(SCRIPT_TESTS) " in *" $$t "*) cmd="sh tests/scripts/$${t}_test.sh" ;; *) cmd="$(BUILD)/$$t" ;; esac; \
+	  if $$cmd > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
 	  case $$t in \
-	    money|sec|devcmd|cmdline) n=$$(grep -c '^PASS' $$log) ;; \
+	    money|sec|devcmd|cmdline|boot_b) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
@@ -101,6 +107,10 @@ lint:
 ifeq ($(UNAME),Linux)
 	$(CC) $(LINT_FLAGS) $(LINT_DEVICE)
 endif
+	@# The authorization test hook must exist only in the test and fuzz builds of this Makefile.
+	@# O gancho de teste da autorização só pode existir nos builds de teste e fuzz deste Makefile.
+	@if grep -rn -e 'BANKPHONE_AUTH_TEST' build.sh install.sh scripts .github init/main.c init/ui.c init/hw.c init/money.c init/store.c; then \
+	  echo "ERRO: BANKPHONE_AUTH_TEST aparece fora dos testes / BANKPHONE_AUTH_TEST outside the tests"; exit 1; fi
 	@echo "lint OK"
 
 lint-strict:
@@ -131,13 +141,14 @@ FUZZ_RUN     = build/fuzz/fuzz_$(1) $(FUZZ_TIME) tests/fuzz/corpus/$(1)
 endif
 
 SRC_fuzz_devcmd := tests/fuzz/fuzz_devcmd.c
-SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c
+SRC_fuzz_money  := tests/fuzz/fuzz_money.c init/money.c init/sec.c
+FLAGS_fuzz_money := -DBANKPHONE_AUTH_TEST
 SRC_fuzz_cmdline := tests/fuzz/fuzz_cmdline.c
 LIBS_fuzz_money := -lm
 
 build/fuzz/fuzz_%: $$(SRC_fuzz_%) $(FUZZ_DRIVER) $(HDRS) tests/fuzz/driver.c
 	@mkdir -p build/fuzz
-	$(FUZZ_CC) $(FUZZ_FLAGS) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
+	$(FUZZ_CC) $(FUZZ_FLAGS) $(FLAGS_fuzz_$*) -o $@ $(FUZZ_DRIVER) $(SRC_fuzz_$*) $(LIBS_fuzz_$*)
 
 fuzz: $(addprefix build/fuzz/fuzz_,$(FUZZ_TARGETS))
 	@for f in $(FUZZ_TARGETS); do \

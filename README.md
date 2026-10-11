@@ -36,7 +36,7 @@ The installer:
 1. detects the phone over USB and refuses anything that is not an X669C;
 2. pulls the touch firmware from your own phone (Android only), then reboots to the bootloader;
 3. checks that the bootloader is unlocked and that the phone has A/B slots;
-4. gets the `boot` image of your phone with `fastboot fetch` (or use `--stock-boot your_boot.img`, taken from your model's official firmware);
+4. uses the `boot` image of your own phone: pass `--stock-boot your_boot.img` (taken from your model's official firmware) or set `STOCK_BOOT` in `local.env`. Without one, it tries `fastboot fetch`, which the X669C refuses (see below);
 5. builds the system and packs a read-only test image;
 6. shows a summary and writes only after you type the exact confirmation, to the inactive slot.
 
@@ -44,9 +44,9 @@ No phone data ships in this repository. The kernel, device tree, touch firmware 
 
 If `adb` and `fastboot` are not in your `PATH`, copy `local.env.example` to `local.env` and set the paths.
 
-A phone running an image from before this command existed ignores it. In that case the installer says so and you enter fastboot once by hand (hold Vol+ for 3 seconds on BANKPHONE); the image it flashes accepts the command, and after that it is automatic.
+Checked on a real X669C: with a test image running, `./install.sh` sent the command over USB and the phone rebooted into fastboot by itself, with no button pressed, and the installer carried on to the summary. A phone running an image from before this command existed ignores it. In that case the installer says so and you enter fastboot once by hand (hold Vol+ for 3 seconds on BANKPHONE); the image it flashes accepts the command, and after that it is automatic.
 
-Not verified yet: the serial command on a real X669C (it is tested on the computer and with a simulated device), `fastboot fetch` on a real X669C, and the touch firmware `adb pull` on stock Android. If `fetch` is refused, the installer stops and asks for `--stock-boot`. A slot that fails to boot is not guaranteed to fall back to the original one by itself, so make sure you can reach fastboot.
+Checked on a real X669C and refused: `fastboot fetch`. This bootloader does not support it, so you must provide the boot image yourself (`--stock-boot`). Not verified yet: the touch firmware `adb pull` on stock Android. A slot that fails to boot is not guaranteed to fall back to the original one by itself, so make sure you can reach fastboot.
 
 Manual steps: `tools/get-touch-firmware.sh`, then `./build.sh` (needs `ZIG` and `STOCK_BOOT` in `local.env`), then `bash scripts/pack-test-image.sh`. Without the touch firmware the build works, but the screen does not respond to touch.
 
@@ -68,6 +68,19 @@ Render the screens to PNG with the same drawing code the phone runs:
 ```bash
 ./scripts/host-preview.sh out/
 ```
+
+## See the real screen of the phone, over the cable
+
+Test images (kernel command line `bankphone.devcmd=1`) accept a few one-line commands on the USB serial port. `tools/screenshot.py` uses them to capture the frame the UI drew, from memory, so it works even with a broken screen. A production image accepts no commands.
+
+```bash
+tools/screenshot.py shot.png                     # capture the current screen
+tools/screenshot.py shot.png --tap 360,920       # tap (x, y) first, then capture
+```
+
+The frame travels compressed, and the tool refuses any frame that does not end with an end marker, so a truncated capture is never saved as a good one. Needs only `python3`.
+
+The installer speaks English and Portuguese: set `BANKPHONE_LANG=en` or `pt` (the default follows `$LANG`).
 
 ## Layout
 
@@ -130,11 +143,17 @@ O instalador reconhece o aparelho (só aceita o X669C), pega o firmware do toque
 
 Nenhum dado de celular vem neste repositório: kernel, firmware do toque e imagem de boot saem do seu aparelho. Se `adb` e `fastboot` não estiverem no `PATH`, copie `local.env.example` para `local.env` e ajuste os caminhos.
 
-Ainda não verificado: o `fastboot fetch` em um X669C de verdade e o `adb pull` do firmware em um Android de fábrica. Se o `fetch` for recusado, o instalador para e pede `--stock-boot`. Também não há garantia de que um slot que não sobe volte sozinho para o original.
+Conferido em um X669C de verdade: com uma imagem de teste rodando, o `./install.sh` mandou o comando pela USB e o celular reiniciou no fastboot sozinho, sem botão, e o instalador seguiu até o resumo. Conferido e recusado: o `fastboot fetch`. Este bootloader não o aceita, então você precisa fornecer a imagem de boot (`--stock-boot`, tirada do firmware oficial do seu modelo ou definida em `STOCK_BOOT` no `local.env`). Ainda não verificado: o `adb pull` do firmware em um Android de fábrica. Também não há garantia de que um slot que não sobe volte sozinho para o original.
 
 ## Testar sem o celular
 
 `make test`, `make test-asan`, `make lint`, `make fuzz` e o `./scripts/host-preview.sh out/` funcionam só no computador, sem o celular. Veja o [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Ver a tela real do celular, pelo cabo
+
+As imagens de teste (cmdline `bankphone.devcmd=1`) aceitam alguns comandos de uma linha na porta serial USB. O `tools/screenshot.py` os usa para capturar o quadro que a UI desenhou, direto da memória, então funciona até com a tela quebrada. Uma imagem de produção não aceita comandos. Exemplo: `tools/screenshot.py shot.png --tap 360,920` toca em (x, y) e depois captura. O quadro viaja comprimido, e a ferramenta recusa qualquer quadro sem a marca de fim.
+
+O instalador fala inglês e português: use `BANKPHONE_LANG=en` ou `pt` (o padrão segue o `$LANG`).
 
 ## Licença
 

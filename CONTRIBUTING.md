@@ -43,7 +43,7 @@ When the fuzzer finds a bug: fix it, add the crashing input to `tests/fuzz/corpu
 
 ### Tests for new code
 
-Put host tests in `tests/` (or `init/tests/` for the storage and display code) and add them to the `TESTS` list in the `Makefile`. Tests must run on a computer, without hardware.
+Put host tests in `tests/` (or `init/tests/` for the storage and display code) and add them to the `TESTS` list in the `Makefile`. Tests must run on a computer, without hardware. Shell scripts that call `fastboot`/`adb` are tested in `tests/scripts/<name>_test.sh` with a **fake** `fastboot` on `PATH` (list them in `SCRIPT_TESTS` in the `Makefile`); a script test must never need a phone.
 
 ---
 
@@ -86,4 +86,4 @@ Quando o fuzzer achar um bug: corrija, coloque a entrada que quebrou em `tests/f
 
 ### Testes para código novo
 
-Coloque testes de computador em `tests/` (ou `init/tests/` para armazenamento e tela) e acrescente-os à lista `TESTS` do `Makefile`. Os testes precisam rodar em um computador, sem hardware.
+Coloque testes de computador em `tests/` (ou `init/tests/` para armazenamento e tela) e acrescente-os à lista `TESTS` do `Makefile`. Os testes precisam rodar em um computador, sem hardware. Scripts de shell que chamam `fastboot`/`adb` são testados em `tests/scripts/<nome>_test.sh` com um `fastboot` **falso** no `PATH` (liste em `SCRIPT_TESTS` no `Makefile`); um teste de script nunca pode precisar de um celular.

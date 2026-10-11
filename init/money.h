@@ -8,7 +8,8 @@ typedef enum { A_BRL = 0, A_USDC = 1, A_N = 2, A_NONE = -1 } Asset;
 typedef enum { T_FUNDING, T_PIX_IN, T_PIX_OUT, T_SWAP } TxType;
 typedef enum { S_CREATED, S_QUOTED, S_AWAITING_AUTH, S_AUTHORIZED, S_SIGNED, S_BROADCASTING, S_PENDING, S_CONFIRMED, S_FAILED, S_CANCELLED, S_EXPIRED } TxState;
 // Não há leitor biométrico no sistema: níveis acima de PIN usam 2ª confirmação explícita e espera.
-typedef enum { L_PIN = 1, L_CONFIRM = 2, L_COOLDOWN = 3 } Level;
+// O tipo Level e a concessão de autorização ficam em sec.h / The Level type and the authorization grant live in sec.h.
+#include "sec.h"
 
 #define MAX_TX 400
 typedef struct {
@@ -40,8 +41,11 @@ Tx     *m_prepare_pix(const char *dest, int64_t cents, int64_t now, const char *
 int     m_quote(int from, int to, int64_t amt, int64_t now, Quote *q);   // 1 = ok
 Tx     *m_prepare_swap(const Quote *q, int64_t now, const char **err);
 Level   m_required(const Tx *t);
-// Executa após autenticação. Devolve NULL se OK, ou texto do motivo (estado da tx indica o resultado).
-const char *m_authorize(Tx *t, Level achieved, int64_t now);
+// Autoriza e executa SÓ com uma concessão viva, emitida por sec.c quando o PIN foi conferido (auth_peek).
+// Não recebe nível do chamador. Devolve NULL se OK, ou texto do motivo (o estado da tx indica o resultado).
+// Authorises and executes ONLY with a live grant issued by sec.c when the PIN was verified (auth_peek).
+// It takes no level from the caller. Returns NULL if OK, or the reason text (the tx state tells the result).
+const char *m_authorize(Tx *t, int64_t now);
 void    m_cancel(Tx *t, int64_t now);
 int64_t m_pix_spent_since(int64_t since);
 const char *m_state_name(TxState s);
@@ -52,4 +56,5 @@ int64_t parse_cents(const char *digits);                         // só dígitos
 
 // serialização para persistência
 size_t  m_serialize(char *buf, size_t cap);
-int     m_deserialize(const char *buf);
+int     m_deserialize(const char *buf);       // 1 ok · 0 inválido (livro-razão fica vazio; motivo em m_deserialize_error)
+const char *m_deserialize_error(void);

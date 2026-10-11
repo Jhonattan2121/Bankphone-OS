@@ -809,28 +809,88 @@ static void key_action(int code)
     }
 }
 
-// Comando pela USB (só imagens de teste): o instalador manda uma linha pela serial
-// e o aparelho reinicia sozinho no bootloader. Exige bankphone.devcmd=1 na cmdline.
-static void devcmd_poll(void)
+// Comandos pela USB (só imagens de teste, com bankphone.devcmd=1 na cmdline):
+//   BANKPHONE:REBOOT-BOOTLOADER  reinicia no fastboot (usado pelo install.sh)
+//   BANKPHONE:SCREENSHOT         manda o quadro que a UI desenhou, em RGB, pela serial
+//   BANKPHONE:TOUCH ev x y       injeta um toque na UI (ev: 0 toca, 1 move, 2 solta)
+// O screenshot sai do buffer da UI e não da tela física: funciona com o painel quebrado.
+// Commands over USB (test images only): reboot to fastboot, send the UI frame as RGB, inject a touch.
+// The screenshot comes from the UI buffer, not from the physical panel, so it works with a broken screen.
+static int ser_write_all(int fd, const void *p, size_t n)
+{
+    size_t off = 0; int stall = 0;
+    while (off < n) {
+        ssize_t w = write(fd, (const char *)p + off, n - off);
+        if (w > 0) { off += (size_t)w; stall = 0; continue; }
+        if (w == 0 || (w < 0 && (errno == EAGAIN || errno == EINTR))) {
+            struct pollfd pf = { fd, POLLOUT, 0 };
+            if (poll(&pf, 1, 500) <= 0 && ++stall >= 40) { errno = ETIMEDOUT; return -1; }   /* o host parou de ler / host stopped reading */
+            continue;
+        }
+        return -1;
+    }
+    return 0;
+}
+
+// O quadro vai comprimido (RLE): cada grupo é [repetições 1..255][R][G][B]. Uma tela de UI é quase toda
+// de cor lisa, então 3,4 MB viram poucas centenas de KB e a transferência não depende da vazão da USB.
+// The frame is sent run-length encoded: each group is [count 1..255][R][G][B]. A UI screen is mostly flat color.
+static void send_frame(void)
+{
+    int fd = bd_serial_fd();
+    if (fd < 0) return;
+    size_t px = (back && FW > 0 && FH > 0) ? (size_t)FW * (size_t)FH : 0;
+    uint8_t *enc = px ? malloc(px * 4) : NULL;
+    size_t o = 0;
+    if (px && !enc) { bd_log("devcmd: screenshot sem memoria"); return; }
+    for (size_t i = 0; i < px; ) {
+        uint32_t c = back[i] & 0xFFFFFFu;
+        size_t j = i + 1;
+        while (j < px && j - i < 255 && (back[j] & 0xFFFFFFu) == c) j++;
+        enc[o++] = (uint8_t)(j - i); enc[o++] = (uint8_t)(c >> 16); enc[o++] = (uint8_t)(c >> 8); enc[o++] = (uint8_t)c;
+        i = j;
+    }
+    char hdr[80];
+    int hl = snprintf(hdr, sizeof hdr, "\nBANKPHONE:FRAME %d %d %zu rle\n", px ? FW : 0, px ? FH : 0, o);
+    int bad = ser_write_all(fd, hdr, (size_t)hl) < 0 || (o && ser_write_all(fd, enc, o) < 0)
+              || ser_write_all(fd, "\nBANKPHONE:END\n", 15) < 0;
+    int err = errno;
+    free(enc);
+    if (bad) bd_log("devcmd: screenshot falhou (errno=%d) ao enviar %zu bytes", err, o);
+    else bd_log("devcmd: screenshot enviado (%dx%d, %zu bytes comprimidos)", px ? FW : 0, px ? FH : 0, o);
+}
+
+// Devolve 1 se a UI precisa ser redesenhada (um toque injetado mudou algo).
+static int devcmd_poll(int ui_ready)
 {
     static int on = -1;
     static DevCmd dc;
+    int redraw = 0;
     if (on < 0) {
         on = plat_boot_prop("bankphone.devcmd")[0] == '1';
-        bd_log("devcmd: %s", on ? "ativo (imagem de teste): aceito REBOOT-BOOTLOADER pela serial" : "desligado");
+        bd_log("devcmd: %s", on ? "ativo (imagem de teste): aceito REBOOT-BOOTLOADER, SCREENSHOT e TOUCH pela serial" : "desligado");
     }
-    if (!on) return;
+    if (!on) return 0;
     int fd = bd_serial_fd();
-    if (fd < 0) return;
+    if (fd < 0) return 0;
     char b[64];
-    ssize_t n = read(fd, b, sizeof b);
-    if (n <= 0) return;
-    if (devcmd_feed(&dc, b, (int)n) == DEVCMD_REBOOT_BOOTLOADER) {
-        const char *arg = plat_boot_prop("bankphone.fastboot");
-        if (!arg[0]) arg = "bootloader";
-        bd_log("devcmd: reiniciando no bootloader a pedido da serial (argumento '%s')", arg);
-        bd_reboot_restart2(arg);                           /* NÃO grava partição */
+    ssize_t n;
+    while ((n = read(fd, b, sizeof b)) > 0) {
+        for (ssize_t i = 0; i < n; i++) {                  /* byte a byte: nenhuma linha se perde / no line is lost */
+            int r = devcmd_feed(&dc, b + i, 1);
+            if (r == DEVCMD_REBOOT_BOOTLOADER) {
+                const char *arg = plat_boot_prop("bankphone.fastboot");
+                if (!arg[0]) arg = "bootloader";
+                bd_log("devcmd: reiniciando no bootloader a pedido da serial (argumento '%s')", arg);
+                bd_reboot_restart2(arg);                   /* NÃO grava partição */
+            } else if (r == DEVCMD_SCREENSHOT) {
+                send_frame();
+            } else if (r == DEVCMD_TOUCH && ui_ready) {
+                redraw |= ui_touch(dc.ev, dc.x, dc.y);
+            }
+        }
     }
+    return redraw;
 }
 
 // Brilho: UM caminho só. Depois da descoberta (F1), quem manda é o HardwareService,
@@ -910,7 +970,22 @@ static void load_state(void)
     int r = store_load(buf, sizeof buf - 1, &n);
     if (r == 0) {
         buf[n] = 0; char *nl = strchr(buf, '\n');
-        if (buf[0] == 'P' && nl) { *nl = 0; pin_deserialize(buf); m_deserialize(nl + 1); }
+        if (buf[0] == 'P' && nl) {
+            /* PIN e livro-razão são aplicados juntos ou nenhum: se um dos dois for recusado, o PIN volta
+             * ao que era e o motivo vai para o relatório.
+             * PIN and ledger apply together or not at all: if either is refused, the PIN is restored
+             * and the reason goes in the report. */
+            Pin antes = PIN; *nl = 0;
+            if (!pin_deserialize(buf)) {
+                PIN = antes; m_init();
+                bd_log("store: linha do PIN recusada — seguindo com estado novo");
+            } else if (!m_deserialize(nl + 1)) {
+                PIN = antes;
+                bd_log("store: livro-razão recusado (%s) — seguindo com estado novo", m_deserialize_error());
+            }
+        } else {
+            bd_log("store: estado sem cabeçalho de PIN reconhecível — seguindo com estado novo");
+        }
         bd_log("store: carregado (pin=%d tx=%d, %u bytes, slot %s%s)",
                PIN.set, M.n, (unsigned)n,
                ST.seq[0] >= ST.seq[1] ? "A" : "B", ST.recovered ? ", RECUPERADO do outro slot" : "");
@@ -1064,7 +1139,7 @@ int main(void)
         if (tfd >= 0) pf[np++] = (struct pollfd){ tfd, POLLIN, 0 };
         for (int i = 0; i < nk; i++) pf[np++] = (struct pollfd){ kfd[i], POLLIN, 0 };
         poll(pf, np, 100);            /* 100 ms: o protocolo A precisa de um relógio para o UP */
-        devcmd_poll();                /* comando do instalador pela USB (só se bankphone.devcmd=1) */
+        dirty |= devcmd_poll(on && ui_live);   /* comandos pela USB (só se bankphone.devcmd=1) */
 
         tc_now(&TS, now_ms());
         if (tc_tick(&TS, 250))        /* silêncio no protocolo A = dedo solto */

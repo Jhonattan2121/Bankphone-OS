@@ -48,6 +48,32 @@ static void exercise_state_readers(void) {
     NEED(m_serialize(big, sizeof big) < sizeof big);
 }
 
+/* N07: authorising needs a live grant for THIS transaction, at a high enough level, inside its lifetime.
+ * The fuzzer mints grants with the test hook (the real issuer, pin_check, costs 18 ms per call), in good and in
+ * bad ways, and checks that the engine accepts exactly the good ones. Single use is checked every time.
+ * N07: autorizar exige concessão viva para ESTA transação, em nível suficiente, dentro da validade. O fuzzer
+ * emite concessões com o gancho de teste (o emissor real, pin_check, custa 18 ms por chamada), de jeitos bons e
+ * ruins, e confere que o motor aceita exatamente os bons. O uso único é conferido sempre. */
+static void authorize_op(Tx *t, const uint8_t *d, size_t n, size_t *i, int64_t now) {
+    int mode = *i < n ? d[(*i)++] % 5 : 0;
+    Level lvl = (Level)(1 + (*i < n ? d[(*i)++] % 3 : 0));
+    int64_t age = *i < n ? (int64_t)d[(*i)++] - 40 : 0;           /* -40..215 s: before, inside, after the lifetime / antes, dentro, depois da validade */
+    int awaiting = t->st == S_AWAITING_AUTH;
+    Level need = m_required(t);
+    int good = 0;
+    auth_clear();
+    if (mode == 1) { auth_test_mint(t->id, lvl, now - age); good = lvl >= need && age >= 0 && age <= AUTH_TTL_S; }
+    if (mode == 2) { char other[16]; snprintf(other, sizeof other, "x%s", t->id); auth_test_mint(other, L_COOLDOWN, now); }   /* another tx / outra tx */
+    if (mode == 3) { auth_test_mint(t->id, L_COOLDOWN, now); auth_clear(); }                                               /* cleared / descartada */
+    TxState before = t->st;
+    m_authorize(t, now);
+    int decided = before == S_AWAITING_AUTH && (t->st == S_AUTHORIZED || t->st == S_CONFIRMED);
+    if (mode != 1 || !good) NEED(!decided);                       /* no good grant, no authorisation / sem concessão boa, sem autorização */
+    if (decided) NEED(awaiting && good);
+    if (decided || (before == S_AWAITING_AUTH && t->st != S_AWAITING_AUTH)) NEED(auth_peek(t->id, now) == L_NONE);   /* single use / uso único */
+    auth_clear();
+}
+
 static int64_t amount(const uint8_t *d, size_t n, size_t *i) {
     uint64_t v = 0; for (int k = 0; k < 5 && *i < n; k++) v = (v << 8) | d[(*i)++];
     return (int64_t)(v % 100000000001ull);                        /* 0..parse_cents maximum / 0..máximo do parse_cents */
@@ -68,7 +94,7 @@ static void run_ops(const uint8_t *d, size_t n) {
         case 2: { int f = i < n ? d[i++] % 3 - 1 : 0, to = i < n ? d[i++] % 3 - 1 : 0;
                   have_q = m_quote(f, to, amount(d, n, &i), now, &q); } break;
         case 3: if (have_q) m_prepare_swap(&q, now, &err); break;
-        case 4: if (M.n) { i++; t = &M.tx[idx]; m_authorize(t, (Level)(1 + (i < n ? d[i++] % 3 : 0)), now); } break;
+        case 4: if (M.n) { i++; t = &M.tx[idx]; authorize_op(t, d, n, &i, now); } break;
         case 5: if (M.n) { i++; m_cancel(&M.tx[idx], now); } break;
         case 6: now += i < n ? (int64_t)d[i++] * 7 : 1; break;
         case 7: if (i < n) { uint8_t f = d[i++]; M.emergency = f & 1; M.pix_offline = (f >> 1) & 1; } break;
@@ -90,7 +116,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) {
     if (n < 1 || n > 4096) return 0;
     if (d[0] & 1) {
         char *s = malloc(n); memcpy(s, d + 1, n - 1); s[n - 1] = 0;
-        m_deserialize(s); free(s);
+        int ok = m_deserialize(s); free(s);
+        /* tudo-ou-nada: recusado => vazio; aceito => saldos não negativos, estados finais, tetos de valor */
+        /* all-or-nothing: refused => empty; accepted => balances >= 0, valid states, amount caps */
+        if (!ok) { NEED(M.n == 0); NEED(m_deserialize_error()[0] != 0); }
+        else { NEED(m_balance(A_BRL) >= 0 && m_balance(A_USDC) >= 0); NEED(M.n <= MAX_TX);
+               for (int i = 0; i < M.n; i++) { NEED(M.tx[i].from_amt >= 0 && M.tx[i].to_amt >= 0); NEED(M.tx[i].st != S_CREATED && M.tx[i].st != S_QUOTED && M.tx[i].st != S_AWAITING_AUTH); } }
         exercise_state_readers();
     } else run_ops(d + 1, n - 1);
     return 0;
