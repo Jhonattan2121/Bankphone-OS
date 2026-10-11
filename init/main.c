@@ -15,6 +15,7 @@
 #define _GNU_SOURCE
 #include "bootdiag.h"
 #include "devcmd.h"
+#include "entropy.h"
 #include "gfx.h"
 #include "money.h"
 #include "sec.h"
@@ -845,7 +846,7 @@ static int set_brightness(int pct)
 static int64_t boot_mono(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec; }
 int plat_clock_valid(void) { return time(NULL) > 1700000000; }
 int64_t plat_now(void) { return plat_clock_valid() ? (int64_t)time(NULL) : boot_mono(); }
-void plat_random(uint8_t *b, int n) { int f = open("/dev/urandom", O_RDONLY); if (f >= 0) { if (read(f, b, n) < 0) {} close(f); } else for (int i = 0; i < n; i++) b[i] = (uint8_t)(boot_mono() * 31 + i * 17); }
+int plat_random(uint8_t *b, int n) { return n < 0 ? -1 : entropy_fill(b, (size_t)n); }   /* sem plano B previsível / no predictable fallback */
 static int persist = 0;
 int plat_persist_ok(void) { return persist; }
 void plat_save(void)

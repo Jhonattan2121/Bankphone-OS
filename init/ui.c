@@ -216,7 +216,12 @@ static void lock_key(int k)
         if (!pin_first[0]) { snprintf(pin_first, sizeof pin_first, "%s", p); return; }
         if (strcmp(pin_first, p)) { pin_first[0] = 0; return; }
         uint8_t salt[16];
-        plat_random(salt, 16);
+        if (plat_random(salt, 16) != 0) {               /* no safe randomness: do NOT create a PIN with a weak salt / sem aleatoriedade segura: NÃO cria PIN com sal fraco */
+            pin_first[0] = 0;
+            bd_log("seg: sem aleatoriedade segura do kernel. PIN nao foi criado.");
+            bd_flush();
+            return;
+        }
         if (pin_set(p, salt)) {                         /* KDF failed (memory?): nothing was set / o KDF falhou (memória?): nada foi definido */
             pin_first[0] = 0;
             bd_log("seg: falha ao derivar o PIN (memoria). Nada foi definido.");

@@ -21,7 +21,7 @@ ASAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-
 
 # Test name -> sources and flags (same commands as the README).
 # Nome do teste -> fontes e flags (os mesmos comandos do README).
-TESTS := money sec devcmd store crypto_diff
+TESTS := money sec devcmd store crypto_diff entropy
 
 # touchcore and bootdiag_fb include Linux-only headers (linux/input.h, linux/fb.h), so they
 # only build on Linux. Everything else builds on macOS too.
@@ -39,6 +39,8 @@ LIBS_money      := -lm
 SRC_sec         := tests/sec_test.c init/sec.c
 LIBS_sec        := -lm
 SRC_devcmd      := tests/devcmd_test.c
+SRC_entropy     := tests/entropy_test.c
+FLAGS_entropy   := -Iinit
 SRC_crypto_diff := tests/crypto_diff.c init/sec.c
 LIBS_crypto_diff := -lm
 SRC_store       := init/tests/test_store.c init/store.c init/sec.c
@@ -82,8 +84,8 @@ test: $(BINS)
 	  log=$(BUILD)/$$t.log; \
 	  if [ $$t = crypto_diff ]; then cmd="python3 tests/crypto_diff.py | $(BUILD)/$$t"; else cmd="$(BUILD)/$$t"; fi; \
 	  if sh -c "$$cmd" > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
-	  case $$t in \
-	    money|sec|devcmd|crypto_diff) n=$$(grep -c '^PASS' $$log) ;; \
+	  n=; case $$t in \
+	    money|sec|devcmd|crypto_diff|entropy) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
