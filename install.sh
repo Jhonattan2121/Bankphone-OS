@@ -109,9 +109,15 @@ a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
 a[4] = a[5] = termios.B115200
 termios.tcsetattr(fd, termios.TCSANOW, a)
 for _ in range(3):                      # 3 vezes: se a primeira se perder, a seguinte chega
-    os.write(fd, b"\nBANKPHONE:REBOOT-BOOTLOADER\n")
+    try:
+        os.write(fd, b"\nBANKPHONE:REBOOT-BOOTLOADER\n")
+    except OSError:
+        break                           # a porta sumiu: o aparelho já reiniciou no bootloader
     time.sleep(0.7)
-os.close(fd)
+try:
+    os.close(fd)
+except OSError:
+    pass
 PY
   if ! wait_fastboot "${BANKPHONE_WAIT:-25}"; then
     die "o aparelho não entrou no fastboot em 50 s.
