@@ -13,23 +13,23 @@ O `store` grava e lê com segurança contra queda de energia (dois slots, PENDIN
 - É chamado em `init/main.c:1033` ou `:1040` e **de novo** em `:1163` (retentativa quando a UI sobe depois do modo diagnóstico).
 - `store_open()` atribui `sfd = open(...)` (`init/store.c:228`, `:240`) sem fechar o anterior. **Reproduzido:** duas aberturas bem-sucedidas deixam `fds +2`, e depois de `store_close()` ainda `fds +1`.
 - `m_deserialize` (`init/money.c:174-195`) valida só o tipo (0 a 3) e o estado (0 a 10). **Não valida** `from`/`to` (moeda), sinal nem faixa dos valores, nem coerência entre campos. Já tem fuzzer e uma correção de leitura fora do buffer (PR #12).
-- O estado não tem versão nem cabeçalho de esquema; a linha de PIN passa a ter versão no PR #13.
+- O estado já começa com um cabeçalho `V1 <seq> <emergência>`, mas **a versão não era validada** (qualquer texto antes das linhas `T` era tolerado). A linha de PIN passa a ter versão no PR #13.
 - Integridade = CRC32 no slot. **CRC detecta corrupção acidental; não autentica e não impede adulteração deliberada.**
 
 ## Problema
 1. Estado válido para o CRC, mas semanticamente inválido (valor negativo, moeda 99), entra no livro-razão e pode virar saldo.
-2. Chamar `load_state()` duas vezes vaza descritor e pode reabrir a área.
+2. O `main.c` abre a área de estado duas vezes (modo diagnóstico e depois, quando a UI sobe) e `store_open()` **não fechava o descritor anterior**: vazava um por abertura.
 3. Falha de leitura/interpretação não aparece na tela nem no log.
 
 ## Objetivo
 Carregamento que é seguro repetir, que **rejeita** estado inválido de forma previsível e que diz o que aconteceu.
 
 ## Tarefas
-- [ ] Fazer `store_open()` fechar o descritor anterior (ou recusar reabertura) e `load_state()` ser idempotente (guardar "já carregado").
-- [ ] Definir um **cabeçalho de esquema** do estado (`V<n>`), aceitar versões conhecidas e recusar as desconhecidas, com mensagem.
+- [ ] Fazer `store_open()` fechar o descritor anterior. **Não** fazer `load_state()` carregar uma vez só: `ui_init()` zera o livro-razão (`M`) e o `PIN`, então o estado **precisa** ser carregado de novo depois dele. Idempotente quer dizer: carregar o mesmo estado duas vezes dá o mesmo resultado, sem vazar nada.
+- [ ] Validar o **cabeçalho de esquema** que já existe (`V<n>`): aceitar versões conhecidas, recusar as desconhecidas, com mensagem.
 - [ ] Validar cada campo em `m_deserialize`: moeda em `{A_BRL, A_USDC, A_NONE}`, valores `≥ 0` e abaixo do máximo, tipo coerente com moedas, contagem ≤ `MAX_TX`, `seq` monótono.
 - [ ] Propagar erro: se o estado for inválido, **não** aplicar parcialmente; manter o estado vazio e registrar o motivo no log e no diagnóstico.
-- [ ] Testes: arquivo truncado, versão desconhecida, valor negativo, moeda inválida, duplicata de id, estado com 401 transações, `load_state` chamado duas vezes (contagem de descritores).
+- [ ] Testes: arquivo truncado, versão desconhecida, valor negativo, moeda inválida, duplicata de id, estado com 401 transações, `store_open` chamado várias vezes (contagem de descritores) e estado carregado duas vezes (mesmo resultado).
 - [ ] Estender o fuzzer do motor para exigir que um estado aceito sempre satisfaça as invariantes (saldos ≥ 0).
 - [ ] Documentar o formato e a migração em `docs/STATE_FORMAT.md` e diferenciar **detecção de corrupção** de **proteção contra adulteração** (esta fica no #9).
 
