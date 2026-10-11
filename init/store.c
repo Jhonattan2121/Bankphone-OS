@@ -209,6 +209,11 @@ static unsigned long long file_size_of(int fd)
 
 int store_open(void)
 {
+    /* Reabrir é permitido (o main.c recarrega o estado depois do ui_init): fecha o descritor anterior,
+     * senão cada abertura vaza um.
+     * Reopening is allowed (main.c reloads the state after ui_init): close the previous descriptor,
+     * otherwise every open leaks one. */
+    if (sfd >= 0) { close(sfd); sfd = -1; }
     int pedido = ST.pedido;                  /* vem de store_config() */
     memset(&ST, 0, sizeof ST);
     ST.pedido = pedido;

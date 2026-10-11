@@ -90,7 +90,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) {
     if (n < 1 || n > 4096) return 0;
     if (d[0] & 1) {
         char *s = malloc(n); memcpy(s, d + 1, n - 1); s[n - 1] = 0;
-        m_deserialize(s); free(s);
+        int ok = m_deserialize(s); free(s);
+        /* tudo-ou-nada: recusado => vazio; aceito => saldos não negativos, estados finais, tetos de valor */
+        /* all-or-nothing: refused => empty; accepted => balances >= 0, valid states, amount caps */
+        if (!ok) { NEED(M.n == 0); NEED(m_deserialize_error()[0] != 0); }
+        else { NEED(m_balance(A_BRL) >= 0 && m_balance(A_USDC) >= 0); NEED(M.n <= MAX_TX);
+               for (int i = 0; i < M.n; i++) { NEED(M.tx[i].from_amt >= 0 && M.tx[i].to_amt >= 0); NEED(M.tx[i].st != S_CREATED && M.tx[i].st != S_QUOTED && M.tx[i].st != S_AWAITING_AUTH); } }
         exercise_state_readers();
     } else run_ops(d + 1, n - 1);
     return 0;
