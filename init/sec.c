@@ -247,7 +247,8 @@ int pin_check(const char *pin, int64_t now) {
         sec_wipe(v, sizeof v); sec_wipe(sk, sizeof sk);
     }
     if (ok) { PIN.fails = 0; return 0; }
-    if (++PIN.fails >= 5) { int e = PIN.fails - 5; if (e > 6) e = 6; PIN.locked_until = now + 30 * (1 << e); }
+    if (PIN.fails < PIN_MAX_FAILS) PIN.fails++;          /* bounded: signed overflow is undefined / limitado: overflow com sinal é indefinido */
+    if (PIN.fails >= 5) { int e = PIN.fails - 5; if (e > 6) e = 6; PIN.locked_until = now + 30 * (1 << e); }
     return 1;
 }
 int64_t pin_locked_s(int64_t now) { return now < PIN.locked_until ? PIN.locked_until - now : 0; }
@@ -272,6 +273,9 @@ int pin_deserialize(const char *buf) {
         ver = 1;
     }
     if (strlen(s) != 32 || strlen(h) != 64) return 0;
+    /* The state file is not authenticated (the CRC only catches accidents), so the counters are validated too.
+     * O arquivo de estado não é autenticado (o CRC só pega acidente), então os contadores também são validados. */
+    if ((set != 0 && set != 1) || fails < 0 || fails > PIN_MAX_FAILS || lu < 0) return 0;
     if (!unhex(PIN.salt, s, 16) || !unhex(PIN.hash, h, 32)) return 0;
     PIN.set = set; PIN.fails = fails; PIN.locked_until = lu;
     PIN.ver = set ? ver : 0; PIN.log2n = set && ver == 2 ? ln : 0; PIN.r = set && ver == 2 ? r : 0; PIN.p = set && ver == 2 ? p : 0;

@@ -134,6 +134,13 @@ int main(void) {
         T("deserializar nao deixa a chave do estado na memoria", pin_state_key() == NULL);
         T("recusa custo absurdo guardado no estado (N=2^30)", !pin_deserialize("P2 1 0 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 30 8 1"));
         T("recusa custo que pede memoria demais (r=32, N=2^24)", !pin_deserialize("P2 1 0 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 24 32 1"));
+        /* tampered counters in the (unauthenticated) state file / contadores adulterados no arquivo de estado */
+        T("recusa contador de erros INT_MAX", !pin_deserialize("P2 1 2147483647 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 10 8 1"));
+        T("recusa contador de erros negativo", !pin_deserialize("P2 1 -1000 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 10 8 1"));
+        T("recusa set diferente de 0 e 1", !pin_deserialize("P2 7 0 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 10 8 1"));
+        T("recusa locked_until negativo", !pin_deserialize("P2 1 0 -5 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 10 8 1"));
+        T("aceita contador no limite", pin_deserialize("P2 1 1000 0 0102030405060708090a0b0c0d0e0f10 0000000000000000000000000000000000000000000000000000000000000000 10 8 1") && PIN.fails == 1000);
+        { int a = pin_check("000000", 50); T("no limite o contador nao passa de PIN_MAX_FAILS", a != 3 && PIN.fails == PIN_MAX_FAILS); }
         T("recusa hash curto", !pin_deserialize("P2 1 0 0 0102030405060708090a0b0c0d0e0f10 00ff 10 8 1"));
         T("recusa linha cortada", !pin_deserialize("P2 1 0 0"));
     }
