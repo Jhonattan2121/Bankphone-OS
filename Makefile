@@ -45,6 +45,10 @@ SRC_touchcore   := init/tests/test_touchcore.c
 SRC_bootdiag_fb := init/tests/test_bootdiag_fb.c init/bootdiag.c
 FLAGS_bootdiag_fb := -Iinit
 
+# Testes de script (shell): tests/scripts/<nome>_test.sh, com programas externos FALSOS no PATH.
+# Shell-script tests: tests/scripts/<name>_test.sh, with FAKE external programs on PATH.
+SCRIPT_TESTS := boot_b
+
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 
@@ -74,12 +78,14 @@ $(BUILD):
 # Each test prints in its own way; here we only count how many checks passed.
 # Cada teste imprime do seu jeito; aqui só se conta quantas verificações passaram.
 test: $(BINS)
+	@mkdir -p $(BUILD)
 	@fail=0; total=0; \
-	for t in $(TESTS); do \
+	for t in $(TESTS) $(SCRIPT_TESTS); do \
 	  log=$(BUILD)/$$t.log; \
-	  if $(BUILD)/$$t > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
+	  case " $(SCRIPT_TESTS) " in *" $$t "*) cmd="sh tests/scripts/$${t}_test.sh" ;; *) cmd="$(BUILD)/$$t" ;; esac; \
+	  if $$cmd > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
 	  case $$t in \
-	    money|sec|devcmd) n=$$(grep -c '^PASS' $$log) ;; \
+	    money|sec|devcmd|boot_b) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
