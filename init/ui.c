@@ -209,23 +209,23 @@ static void lock_key(int k)
 
     char p[8];
     snprintf(p, sizeof p, "%s", pinbuf);
-    pinbuf[0] = 0;
+    sec_wipe(pinbuf, sizeof pinbuf);
     pin_len_spelhar(0);
 
     if (!PIN.set) {                                     /* primeiro uso: cria */
-        if (!pin_first[0]) { snprintf(pin_first, sizeof pin_first, "%s", p); return; }
-        if (strcmp(pin_first, p)) { pin_first[0] = 0; return; }
+        if (!pin_first[0]) { snprintf(pin_first, sizeof pin_first, "%s", p); sec_wipe(p, sizeof p); return; }
+        if (strcmp(pin_first, p)) { sec_wipe(pin_first, sizeof pin_first); sec_wipe(p, sizeof p); return; }
         uint8_t salt[16];
         plat_random(salt, 16);
         int sr = pin_set(p, salt);
         sec_wipe(p, sizeof p); sec_wipe(pin_first, sizeof pin_first); sec_wipe(salt, sizeof salt);
         if (sr) {                                       /* KDF failed (memory?): nothing was set / o KDF falhou (memória?): nada foi definido */
-            pin_first[0] = 0;
+            sec_wipe(pin_first, sizeof pin_first);
             bd_log("seg: falha ao derivar o PIN (memoria). Nada foi definido.");
             bd_flush();
             return;
         }
-        pin_first[0] = 0;
+        sec_wipe(pin_first, sizeof pin_first);
         plat_save();
         locked = 0;
         bd_log("seg: PIN definido e gravado (sal do kernel, scrypt)");
@@ -335,7 +335,7 @@ static void act(int a, int arg)
         if (SH.pend >= 0) { m_cancel(&M.tx[SH.pend], plat_now()); SH.pend = -1; plat_save(); }
         sheet = SH_NONE;
         return;
-    case ACT_AUTH:      SH.purpose = 0; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0); sheet = SH_PIN; return;
+    case ACT_AUTH:      SH.purpose = 0; SH.msg[0] = 0; sec_wipe(pinbuf, sizeof pinbuf); pin_len_spelhar(0); sheet = SH_PIN; return;
     case ACT_CONFIRM2: {
         int idx = SH.pend;
         if (idx < 0) { sheet = SH_NONE; return; }
@@ -347,7 +347,7 @@ static void act(int a, int arg)
         return; }
     case ACT_TX:        SH.rcpt = arg; sheet = SH_RECEIPT; return;
     case ACT_EMERG:
-        if (M.emergency) { SH.purpose = 1; SH.msg[0] = 0; pinbuf[0] = 0; pin_len_spelhar(0); sheet = SH_PIN; }
+        if (M.emergency) { SH.purpose = 1; SH.msg[0] = 0; sec_wipe(pinbuf, sizeof pinbuf); pin_len_spelhar(0); sheet = SH_PIN; }
         else { M.emergency = 1; plat_save(); bd_log("seg: MODO EMERGÊNCIA ligado (trava Pix e troca) — gravado"); bd_flush(); }
         return;
     case ACT_LOCK:      ui_lock(); return;
@@ -491,7 +491,7 @@ void ui_lock(void)
     pin_forget_key();                                   /* the state key lives only while unlocked / a chave do estado só existe desbloqueado */
     sheet = SH_NONE;
     sp = 0;
-    pinbuf[0] = 0; pin_len_spelhar(0); pin_first[0] = 0;
+    sec_wipe(pinbuf, sizeof pinbuf); pin_len_spelhar(0); sec_wipe(pin_first, sizeof pin_first);
     if (SH.pend >= 0) { m_cancel(&M.tx[SH.pend], plat_now()); SH.pend = -1; plat_save(); }
     bd_log("ui: tela bloqueada");
 }
