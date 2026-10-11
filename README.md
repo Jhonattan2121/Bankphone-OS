@@ -69,6 +69,19 @@ Render the screens to PNG with the same drawing code the phone runs:
 ./scripts/host-preview.sh out/
 ```
 
+## See the real screen of the phone, over the cable
+
+Test images (kernel command line `bankphone.devcmd=1`) accept a few one-line commands on the USB serial port. `tools/screenshot.py` uses them to capture the frame the UI drew, from memory, so it works even with a broken screen. A production image accepts no commands.
+
+```bash
+tools/screenshot.py shot.png                     # capture the current screen
+tools/screenshot.py shot.png --tap 360,920       # tap (x, y) first, then capture
+```
+
+The frame travels compressed, and the tool refuses any frame that does not end with an end marker, so a truncated capture is never saved as a good one. Needs only `python3`.
+
+The installer speaks English and Portuguese: set `BANKPHONE_LANG=en` or `pt` (the default follows `$LANG`).
+
 ## Layout
 
 | Path | Contents |
@@ -135,6 +148,12 @@ Conferido em um X669C de verdade: com uma imagem de teste rodando, o `./install.
 ## Testar sem o celular
 
 `make test`, `make test-asan`, `make lint`, `make fuzz` e o `./scripts/host-preview.sh out/` funcionam só no computador, sem o celular. Veja o [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Ver a tela real do celular, pelo cabo
+
+As imagens de teste (cmdline `bankphone.devcmd=1`) aceitam alguns comandos de uma linha na porta serial USB. O `tools/screenshot.py` os usa para capturar o quadro que a UI desenhou, direto da memória, então funciona até com a tela quebrada. Uma imagem de produção não aceita comandos. Exemplo: `tools/screenshot.py shot.png --tap 360,920` toca em (x, y) e depois captura. O quadro viaja comprimido, e a ferramenta recusa qualquer quadro sem a marca de fim.
+
+O instalador fala inglês e português: use `BANKPHONE_LANG=en` ou `pt` (o padrão segue o `$LANG`).
 
 ## Licença
 
