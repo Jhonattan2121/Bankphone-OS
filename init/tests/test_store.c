@@ -384,29 +384,8 @@ int main(void)
         CHK(ST.saves >= 6, "contador de gravações deveria ser >= 6 (%u)", ST.saves);
     }
 
-    /* --------------------------------------------------------------- 15 -- */
-    printf("\n[15] alternância dos slots em 6 gravações seguidas\n");
-    {
-        CHK(ST.seq[0] != ST.seq[1], "os dois slots não deveriam ter a mesma seq");
-        char buf[512]; size_t n = 0;
-        store_load(buf, sizeof buf, &n); buf[n] = 0;
-        CHK(strcmp(buf, "P1|pin=1|tx=5") == 0, "deveria ler a 6ª gravação, leu '%s'", buf);
-    }
-
-    /* ------------------------------------------------------------- 16 -- */
-    printf("\n[16] store_open repetido não vaza descritor / repeated store_open does not leak an fd\n");
-    {
-        mkpart(0);
-        char h[24]; regiao_hash(h);
-        abrir(h);
-        int antes = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) antes++;
-        for (int i = 0; i < 20; i++) { store_config("file:" PATH, h); store_open(); }   /* sem store_close, como o main.c / no store_close, like main.c */
-        int depois = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) depois++;
-        CHK(depois == antes, "descritores abertos: %d antes, %d depois", antes, depois);
-    }
-
-    /* ------------------------------------------------------------- 17 -- */
-    printf("\n[17] com o slot mais novo de conteúdo ruim, a próxima gravação NUNCA toca o único slot bom\n"
+    /* ------------------------------------------------------------ 14b -- */
+    printf("\n[14b] com o slot mais novo de conteúdo ruim, a próxima gravação NUNCA toca o único slot bom\n"
            "     the next save never touches the only good slot when the newest slot has a bad payload\n");
     {
         /* Reproduzido no 32932dd: o cabeçalho do slot A estava ok (seq maior) mas o conteúdo falhava no CRC; o slot B era bom.
@@ -451,6 +430,27 @@ int main(void)
         { char buf[512]; size_t n = 0; int r = store_load(buf, sizeof buf, &n); buf[n > 0 ? n : 0] = 0;
           CHK(r == 0 && !strcmp(buf, NOVO), "sem queda, o estado novo é o que carrega ('%s')", buf);
           CHK(ST.slot_ok[0] == 1 && ST.slot_ok[1] == 1, "depois de gravar, os dois slots voltam a ser bons (A=%d B=%d)", ST.slot_ok[0], ST.slot_ok[1]); }
+    }
+
+    /* --------------------------------------------------------------- 15 -- */
+    printf("\n[15] alternância dos slots em 6 gravações seguidas\n");
+    {
+        CHK(ST.seq[0] != ST.seq[1], "os dois slots não deveriam ter a mesma seq");
+        char buf[512]; size_t n = 0;
+        store_load(buf, sizeof buf, &n); buf[n] = 0;
+        CHK(strcmp(buf, "P1|pin=1|tx=5") == 0, "deveria ler a 6ª gravação, leu '%s'", buf);
+    }
+
+    /* ------------------------------------------------------------- 16 -- */
+    printf("\n[16] store_open repetido não vaza descritor / repeated store_open does not leak an fd\n");
+    {
+        mkpart(0);
+        char h[24]; regiao_hash(h);
+        abrir(h);
+        int antes = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) antes++;
+        for (int i = 0; i < 20; i++) { store_config("file:" PATH, h); store_open(); }   /* sem store_close, como o main.c / no store_close, like main.c */
+        int depois = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) depois++;
+        CHK(depois == antes, "descritores abertos: %d antes, %d depois", antes, depois);
     }
 
     unlink(PATH);
