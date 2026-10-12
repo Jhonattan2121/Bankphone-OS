@@ -12,6 +12,16 @@ void pin_set(const char *pin, const uint8_t salt[16]);                 // salt v
 int  pin_check(const char *pin, int64_t now);                          // 0 ok, 1 errado, 2 bloqueado
 int64_t pin_locked_s(int64_t now);
 
+/* Bounds of the lockout. The lock deadline is saved as an absolute time, but plat_now() switches between the wall clock (about 1.7e9) and
+ * the uptime (small): a deadline written under one clock and read under the other used to last decades (55.8 years, reproduced on 32932dd).
+ * The longest lock the code ever sets is 30 * 2^6 = 1920 s, so a saved deadline further away than that cannot be real and is clamped.
+ * Limites do bloqueio. O prazo do bloqueio é gravado como hora absoluta, mas o plat_now() alterna entre o relógio real (cerca de 1,7e9) e o
+ * uptime (pequeno): um prazo gravado num relógio e lido no outro durava décadas (55,8 anos, reproduzido no 32932dd). O maior bloqueio que o código
+ * define é 30 * 2^6 = 1920 s, então um prazo salvo mais longe que isso não pode ser real e é limitado. */
+#define PIN_LOCK_MAX_S   1920
+#define PIN_MAX_FAILS    1000                   /* the saved counter is saturated here, never allowed to overflow / o contador salvo satura aqui */
+#define SEC_NOW_MAX      100000000000LL         /* a clock outside [0, this] is refused: now +/- a constant would leave int64 / relógio fora de [0, isto] é recusado */
+
 /* ---- authorization grant / concessão de autorização ----
  * A payment is authorised only with a grant that THIS module issues when a PIN is verified. The money engine
  * asks for it; a caller can no longer say "level 3 reached". One grant at a time, tied to one transaction,
