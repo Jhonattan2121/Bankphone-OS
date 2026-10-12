@@ -12,6 +12,13 @@ typedef enum { S_CREATED, S_QUOTED, S_AWAITING_AUTH, S_AUTHORIZED, S_SIGNED, S_B
 #include "sec.h"
 
 #define MAX_TX 400
+/* Functional limits, NOT type limits. Each one is far below what int64 could hold and is chosen so that every
+ * product stays inside int64 AND every value the engine writes is one its own loader accepts (see money.c).
+ * Limites funcionais, NÃO limites do tipo. Cada um fica muito abaixo do que o int64 aguenta e foi escolhido para
+ * que todo produto caiba no int64 E todo valor que o motor grava seja aceito pelo seu próprio carregador. */
+#define MAX_AMOUNT     1000000000000000LL   /* 1e15: sanity cap for any stored amount / teto de sanidade de qualquer valor gravado */
+#define MAX_SWAP_BRL   100000000000LL       /* 1e11 cents  = R$ 1.000.000.000,00 (same as the UI's typed cap) */
+#define MAX_SWAP_USDC  100000000000000LL    /* 1e14 micro  = 100.000.000 USDC */
 typedef struct {
     char id[12], idem[48], cp[40], fail[96], hash[72];   // hash vazio = sem transação on-chain
     TxType type; TxState st; int from, to;               // from/to: Asset ou A_NONE

@@ -6,8 +6,7 @@
  *   odd  -> the rest of the input is treated as a saved-state file and handed to
  *           m_deserialize(), then everything that reads that state is exercised.
  *
- * Amounts follow the callers' contract: in the UI the value comes from parse_cents(), which
- * only returns 0 to 100000000000 cents.
+ * Amounts: mostly what the UI can type (parse_cents, 0 to 100000000000 cents), plus the boundaries and extremes of int64.
  *
  * ---- Português ----
  * Fuzzing do motor de dinheiro (init/money.c).
@@ -18,10 +17,11 @@
  *   ímpar -> o resto da entrada é tratado como arquivo de estado salvo e entregue a
  *            m_deserialize(), depois se exercita o que lê esse estado.
  *
- * Valores seguem o contrato de quem chama: na interface, o valor vem de parse_cents(),
- * que só devolve de 0 a 100000000000 centavos. */
+ * Valores: a maioria é o que a interface consegue digitar (parse_cents, de 0 a 100000000000 centavos), mais as
+ * fronteiras e os extremos do int64. */
 #include "money.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +32,7 @@ static void check_invariants(int64_t now, const TxState *prev, int prev_n) {
     NEED(M.n >= 0 && M.n <= MAX_TX);
     NEED(m_balance(A_BRL) >= 0);                                  /* never negative / nunca fica negativo */
     NEED(m_balance(A_USDC) >= 0);
+    NEED(m_total_brl() >= 0);                                     /* no overflow wraps it negative / nenhum estouro o deixa negativo */
     NEED(m_pix_spent_since(now - 86400) <= M.pol.daily);          /* daily cap / teto diário */
     for (int i = 0; i < M.n; i++) {
         const Tx *t = &M.tx[i];
@@ -74,7 +75,21 @@ static void authorize_op(Tx *t, const uint8_t *d, size_t n, size_t *i, int64_t n
     auth_clear();
 }
 
+/* Amounts: most are what the UI can type (0..1e11, parse_cents), but the engine's public API takes any int64, so the
+ * fuzzer also feeds the boundaries and the extremes of the type. Before this, only 0..1e11 was ever tried, which is
+ * how a multiplication that overflows above 9.2e12 went unseen (N11).
+ * Valores: a maioria é o que a UI consegue digitar (0..1e11, parse_cents), mas a API pública do motor aceita qualquer
+ * int64, então o fuzzer também usa as fronteiras e os extremos do tipo. Antes só se testava 0..1e11, e assim uma
+ * multiplicação que estoura acima de 9,2e12 passou despercebida (N11). */
+static const int64_t EDGE[] = {
+    0, 1, -1, 349, 350, 351, 560, 561, 100000, 100000000000LL,
+    MAX_SWAP_BRL - 1, MAX_SWAP_BRL, MAX_SWAP_BRL + 1, MAX_SWAP_USDC - 1, MAX_SWAP_USDC, MAX_SWAP_USDC + 1,
+    9223372036854LL, 9223372036855LL, 9223372036854LL + 350, 9223372036855LL + 350, 1000000000000LL,
+    16469827927052811LL, MAX_AMOUNT - 1, MAX_AMOUNT, MAX_AMOUNT + 1, INT64_MAX - 1, INT64_MAX, INT64_MIN + 1, INT64_MIN };
 static int64_t amount(const uint8_t *d, size_t n, size_t *i) {
+    int mode = *i < n ? d[(*i)++] % 4 : 0;
+    if (mode == 1) { size_t k = *i < n ? d[(*i)++] : 0; return EDGE[k % (sizeof EDGE / sizeof *EDGE)]; }
+    if (mode == 2) { uint64_t v = 0; for (int k = 0; k < 8 && *i < n; k++) v = (v << 8) | d[(*i)++]; return (int64_t)v; }
     uint64_t v = 0; for (int k = 0; k < 5 && *i < n; k++) v = (v << 8) | d[(*i)++];
     return (int64_t)(v % 100000000001ull);                        /* 0..parse_cents maximum / 0..máximo do parse_cents */
 }
@@ -91,8 +106,11 @@ static void run_ops(const uint8_t *d, size_t n) {
         switch (op) {
         case 0: m_receive_pix(amount(d, n, &i), "Joao", now); break;
         case 1: m_prepare_pix(i < n && (d[i++] & 1) ? "Maria" : "ab", amount(d, n, &i), now, &err); break;
-        case 2: { int f = i < n ? d[i++] % 3 - 1 : 0, to = i < n ? d[i++] % 3 - 1 : 0;
-                  have_q = m_quote(f, to, amount(d, n, &i), now, &q); } break;
+        case 2: { int f = i < n ? d[i++] % 3 - 1 : 0, to = i < n ? d[i++] % 3 - 1 : 0; int64_t amt = amount(d, n, &i);
+                  have_q = m_quote(f, to, amt, now, &q);
+                  /* a quote the engine gives must be inside the caps and its output must be storable / uma cotação dada tem de respeitar os tetos e a saída tem de ser gravável */
+                  if (have_q) { NEED(q.ok && q.from_amt == amt && amt > 0); NEED(q.to_amt > 0 && q.to_amt <= MAX_AMOUNT);
+                                NEED(f == A_BRL ? amt <= MAX_SWAP_BRL : amt <= MAX_SWAP_USDC); } } break;
         case 3: if (have_q) m_prepare_swap(&q, now, &err); break;
         case 4: if (M.n) { i++; t = &M.tx[idx]; authorize_op(t, d, n, &i, now); } break;
         case 5: if (M.n) { i++; m_cancel(&M.tx[idx], now); } break;

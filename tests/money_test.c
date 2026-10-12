@@ -1,4 +1,5 @@
 #include "../init/money.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -198,6 +199,69 @@ int main(void) {
       for (int i = 0; i < M.n; i++) if (M.tx[i].type == T_FUNDING && M.tx[i].to == A_BRL) M.tx[i].st = S_FAILED;
       auth_expect(a->id); pin_check("123456", now);
       CHECK("saldo insuficiente nega e consome a concessao", m_balance(A_BRL) < 1000 && m_authorize(a, now) != NULL && a->st == S_FAILED && auth_peek(a->id, now) == L_NONE); }
+
+
+    /* ---- N11: arithmetic limits. Reproduced on 32932dd with UBSan before the fix (see docs/review/MONEY_INVARIANTS.md).
+     * ---- N11: limites aritméticos. Reproduzido no 32932dd com UBSan antes da correção. ---- */
+    m_init();
+    { Quote q;
+      /* BRL -> USDC: the product (amount - fee) * 1e6 must never be computed above the functional cap.
+       * BRL -> USDC: o produto (valor - tarifa) * 1e6 nunca pode ser calculado acima do teto funcional. */
+      CHECK("swap BRL no teto funcional e aceito", m_quote(A_BRL, A_USDC, MAX_SWAP_BRL, now, &q) && q.ok);
+      CHECK("swap BRL no teto: saida exata", q.to_amt == (MAX_SWAP_BRL - 350) * 1000000LL / 560);
+      CHECK("swap BRL no teto: a saida cabe no que o carregador aceita", q.to_amt > 0 && q.to_amt <= MAX_AMOUNT);
+      CHECK("swap BRL um centavo acima do teto e recusado", !m_quote(A_BRL, A_USDC, MAX_SWAP_BRL + 1, now, &q) && !q.ok);
+      CHECK("swap BRL no limite do int64 (9223372036855 + tarifa) e recusado", !m_quote(A_BRL, A_USDC, 9223372036855LL + 350, now, &q));
+      CHECK("swap BRL de 1e15 (teto de sanidade) e recusado", !m_quote(A_BRL, A_USDC, 1000000000000000LL, now, &q));
+      CHECK("swap BRL INT64_MAX e recusado", !m_quote(A_BRL, A_USDC, INT64_MAX, now, &q));
+      CHECK("swap BRL negativo e recusado", !m_quote(A_BRL, A_USDC, -1, now, &q) && !m_quote(A_BRL, A_USDC, INT64_MIN, now, &q));
+      CHECK("swap BRL zero e igual a tarifa sao recusados", !m_quote(A_BRL, A_USDC, 0, now, &q) && !m_quote(A_BRL, A_USDC, 350, now, &q));
+      CHECK("swap BRL logo acima da tarifa e aceito", m_quote(A_BRL, A_USDC, 351, now, &q) && q.to_amt == 1 * 1000000LL / 560);
+      /* USDC -> BRL */
+      CHECK("swap USDC no teto funcional e aceito", m_quote(A_USDC, A_BRL, MAX_SWAP_USDC, now, &q) && q.ok);
+      CHECK("swap USDC no teto: saida exata", q.to_amt == MAX_SWAP_USDC / 1000000LL * 560 - 350);
+      CHECK("swap USDC no teto: a saida cabe no que o carregador aceita", q.to_amt > 0 && q.to_amt <= MAX_AMOUNT);
+      CHECK("swap USDC uma unidade acima do teto e recusado", !m_quote(A_USDC, A_BRL, MAX_SWAP_USDC + 1, now, &q) && !q.ok);
+      CHECK("swap USDC onde amt*560 estoura o int64 e recusado", !m_quote(A_USDC, A_BRL, 16469827927052811LL, now, &q));
+      CHECK("swap USDC INT64_MAX e recusado", !m_quote(A_USDC, A_BRL, INT64_MAX, now, &q));
+      CHECK("swap USDC negativo e zero sao recusados", !m_quote(A_USDC, A_BRL, -1, now, &q) && !m_quote(A_USDC, A_BRL, INT64_MIN, now, &q) && !m_quote(A_USDC, A_BRL, 0, now, &q));
+      CHECK("swap entre a mesma moeda e recusado", !m_quote(A_BRL, A_BRL, 1000, now, &q) && !m_quote(A_USDC, A_USDC, 1000, now, &q));
+      CHECK("recusa nao gasta numero de cotacao", (m_quote(A_BRL, A_USDC, MAX_SWAP_BRL + 1, now, &q), q.id[0] == 0)); }
+
+    /* The engine's own output must be accepted by its own loader (closure). A swap at the cap, end to end.
+     * A saida do motor tem que ser aceita pelo proprio carregador. Um swap no teto, de ponta a ponta. */
+    { m_init(); m_load_demo(now); M.pol.pin_max = M.pol.confirm_max = M.pol.per_tx = M.pol.daily = INT64_C(1) << 60;
+      m_receive_pix(MAX_SWAP_BRL, "x", now);
+      Quote q; const char *e = NULL; M.pol.cooldown_s = 1;   /* the 30 s cooldown does not fit in the 20 s quote lifetime: see MONEY_INVARIANTS.md */
+      CHECK("swap no teto: cotacao ok", m_quote(A_BRL, A_USDC, MAX_SWAP_BRL, now, &q));
+      Tx *t = m_prepare_swap(&q, now, &e);
+      CHECK("swap no teto: preparado", t != NULL);
+      if (t) { auth_expect(t->id); pin_check("123456", now); auth_confirm(t->id, now);
+               CHECK("swap no teto: confirmado", m_authorize(t, now + 2) == NULL && t->st == S_CONFIRMED); }
+      static char big[200000]; m_serialize(big, sizeof big);
+      int64_t brl = m_balance(A_BRL), usdc = m_balance(A_USDC);
+      CHECK("swap no teto: o carregador aceita o estado que o motor gravou", m_deserialize(big));
+      CHECK("swap no teto: saldos iguais depois de recarregar", m_balance(A_BRL) == brl && m_balance(A_USDC) == usdc); }
+
+    /* m_total_brl: the USDC balance times the rate must not overflow, whatever a validated state holds.
+     * m_total_brl: saldo em USDC vezes a taxa nao pode estourar, seja qual for o estado validado. */
+    { static char st[40000]; char *p;
+      m_init(); strcpy(st, "V1 1 0\n"); p = st + strlen(st);
+      for (int i = 0; i < 17; i++) p += sprintf(p, "T|id%d|k%d|0|7|-1|1|0|1000000000000000|0|1|DEMO||\n", i, i);
+      CHECK("17 financiamentos de 1e15 micro-USDC passam pelo carregador", m_deserialize(st) && m_balance(A_USDC) == 17000000000000000LL);
+      CHECK("m_total_brl sem estouro: 1.7e16 micro-USDC = 9.52e12 centavos", m_total_brl() == 9520000000000LL);
+      m_init(); strcpy(st, "V1 1 0\n"); p = st + strlen(st);
+      for (int i = 0; i < 200; i++) p += sprintf(p, "T|a%d|ka%d|0|7|-1|0|0|1000000000000000|0|1|DEMO||\n", i, i);
+      for (int i = 0; i < 200; i++) p += sprintf(p, "T|b%d|kb%d|0|7|-1|1|0|1000000000000000|0|1|DEMO||\n", i, i);
+      CHECK("400 linhas de 1e15 passam pelo carregador (o maximo)", m_deserialize(st) && M.n == 400);
+      CHECK("saldo maximo possivel: BRL 2e17 e USDC 2e17", m_balance(A_BRL) == 200000000000000000LL && m_balance(A_USDC) == 200000000000000000LL);
+      CHECK("m_total_brl no saldo maximo: 2e17 + 1.12e14", m_total_brl() == 200112000000000000LL);
+      m_init(); strcpy(st, "V1 1 0\n"); p = st + strlen(st);
+      p += sprintf(p, "T|u1|ku1|0|7|-1|1|0|1999999|0|1|DEMO||\n");
+      m_deserialize(st);
+      CHECK("m_total_brl trunca como antes: 1999999 micro-USDC = 1119 centavos", m_total_brl() == 1119);
+      m_init(); m_load_demo(now);
+      CHECK("m_total_brl no demo: R$ 10.000 + 100 USDC = 1056000", m_total_brl() == 1000000 + 56000); }
 
     printf(fails ? "%d FALHAS\n" : "TODOS OK\n", fails);
     return fails != 0;

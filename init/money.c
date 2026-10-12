@@ -8,8 +8,23 @@ Money M;
 #define RATE 560          // DEMO: 1 USDC = R$ 5,60 (centavos por USDC)
 #define SERVICE_FEE 350   // DEMO: R$ 3,50
 #define QUOTE_TTL 20
-#define MAX_AMOUNT 1000000000000000LL   // 1e15: teto de sanidade para qualquer valor / sanity cap for any amount
 static const int64_t UNIT[A_N] = {100, 1000000};
+
+/* Every product below was checked against int64 at compile time. If someone raises a cap or the rate, the build
+ * fails here instead of overflowing at run time (signed overflow is undefined behaviour in C).
+ * Todo produto abaixo é conferido contra o int64 na compilação. Se alguém subir um teto ou a taxa, o build falha
+ * aqui em vez de estourar na execução (overflow com sinal é comportamento indefinido em C). */
+_Static_assert(MAX_SWAP_BRL * 1000000LL <= INT64_MAX, "BRL->USDC: (amount-fee)*1e6 must fit in int64");
+_Static_assert(MAX_SWAP_BRL * 1000000LL / RATE <= MAX_AMOUNT, "BRL->USDC output must be accepted by the loader");
+_Static_assert(MAX_SWAP_USDC * RATE <= INT64_MAX, "USDC->BRL: amount*rate must fit in int64");
+_Static_assert(MAX_SWAP_USDC <= MAX_AMOUNT && MAX_SWAP_USDC * RATE / 1000000LL <= MAX_AMOUNT, "USDC swap and its output must be accepted by the loader");
+_Static_assert((int64_t)MAX_TX * MAX_AMOUNT * 2 < INT64_MAX, "a sum of MAX_TX amounts, plus one more amount, must fit in int64");
+
+/* USDC micro-units to BRL cents without ever forming usdc*RATE: split into whole units and remainder.
+ * Same result as usdc*RATE/UNIT (both truncate toward zero), but safe for any int64 balance.
+ * Micro-USDC para centavos de BRL sem nunca formar usdc*RATE: separa unidades inteiras e resto.
+ * Mesmo resultado de usdc*RATE/UNIT (os dois truncam para zero), mas seguro para qualquer saldo int64. */
+static int64_t usdc_to_brl(int64_t usdc) { return (usdc / UNIT[A_USDC]) * RATE + ((usdc % UNIT[A_USDC]) * RATE) / UNIT[A_USDC]; }
 
 static int allowed(TxState a, TxState b) {
     switch (a) {
@@ -52,7 +67,7 @@ int64_t m_balance(int a) {
     for (int i = 0; i < M.n; i++) { Tx *t = &M.tx[i]; if (t->st != S_CONFIRMED) continue; if (t->from == a) b -= t->from_amt; if (t->to == a) b += t->to_amt; }
     return b;
 }
-int64_t m_total_brl(void) { return m_balance(A_BRL) + m_balance(A_USDC) * RATE / UNIT[A_USDC]; }
+int64_t m_total_brl(void) { return m_balance(A_BRL) + usdc_to_brl(m_balance(A_USDC)); }
 
 void m_load_demo(int64_t now) {
     static const struct { const char *k; int a; int64_t v; } F[] = {{"demo-fund-brl", A_BRL, 1000000}, {"demo-fund-usdc", A_USDC, 100000000}};
@@ -97,8 +112,10 @@ int m_quote(int from, int to, int64_t amt, int64_t now, Quote *q) {
     memset(q, 0, sizeof *q);
     if (amt <= 0 || from == to) return 0;
     int64_t out;
-    if (from == A_BRL && to == A_USDC) { int64_t net = amt - SERVICE_FEE; if (net <= 0) return 0; out = net * UNIT[A_USDC] / RATE; }
-    else if (from == A_USDC && to == A_BRL) { int64_t gross = amt * RATE / UNIT[A_USDC]; out = gross - SERVICE_FEE; if (out <= 0) return 0; }
+    /* The caps are checked BEFORE the multiplication, so an input the arithmetic cannot take is refused, never computed.
+     * Os tetos são conferidos ANTES da multiplicação: entrada que a conta não aguenta é recusada, nunca calculada. */
+    if (from == A_BRL && to == A_USDC) { if (amt > MAX_SWAP_BRL) return 0; int64_t net = amt - SERVICE_FEE; if (net <= 0) return 0; out = net * UNIT[A_USDC] / RATE; }
+    else if (from == A_USDC && to == A_BRL) { if (amt > MAX_SWAP_USDC) return 0; int64_t gross = usdc_to_brl(amt); out = gross - SERVICE_FEE; if (out <= 0) return 0; }
     else return 0;
     q->from = from; q->to = to; q->from_amt = amt; q->to_amt = out; q->rate = RATE; q->fee_brl = SERVICE_FEE; q->expires = now + QUOTE_TTL; q->ok = 1;
     snprintf(q->id, sizeof q->id, "q%u", ++M.seq);
@@ -127,7 +144,7 @@ Tx *m_prepare_swap(const Quote *q, int64_t now, const char **err) {
 
 static int64_t brl_value(const Tx *t) {
     if (t->from == A_BRL) return t->from_amt;
-    if (t->from == A_USDC) return t->from_amt * RATE / UNIT[A_USDC];
+    if (t->from == A_USDC) return usdc_to_brl(t->from_amt);
     return t->to_amt;
 }
 Level m_required(const Tx *t) { int64_t v = brl_value(t); return v <= M.pol.pin_max ? L_PIN : v <= M.pol.confirm_max ? L_CONFIRM : L_COOLDOWN; }
