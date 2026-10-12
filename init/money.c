@@ -8,6 +8,12 @@ Money M;
 #define RATE 560          // DEMO: 1 USDC = R$ 5,60 (centavos por USDC)
 #define SERVICE_FEE 350   // DEMO: R$ 3,50
 #define QUOTE_TTL 20
+/* The clock is an input. The engine accepts a 'now' only in [0, NOW_MAX]: the loader stores times only in [0, MAX_TIME], and
+ * a quote made at NOW_MAX expires at MAX_TIME, still storable. Outside it, now +/- a constant would also leave int64.
+ * O relógio é uma entrada. O motor só aceita 'now' em [0, NOW_MAX]: o carregador só guarda tempos em [0, MAX_TIME], e uma
+ * cotação feita em NOW_MAX expira em MAX_TIME, ainda gravável. Fora disso, now +/- uma constante também sairia do int64. */
+#define NOW_MAX (MAX_TIME - QUOTE_TTL)
+static int now_ok(int64_t now) { return now >= 0 && now <= NOW_MAX; }
 static const int64_t UNIT[A_N] = {100, 1000000};
 
 /* Every product below was checked against int64 at compile time. If someone raises a cap or the rate, the build
@@ -70,6 +76,7 @@ int64_t m_balance(int a) {
 int64_t m_total_brl(void) { return m_balance(A_BRL) + usdc_to_brl(m_balance(A_USDC)); }
 
 void m_load_demo(int64_t now) {
+    if (!now_ok(now)) return;
     static const struct { const char *k; int a; int64_t v; } F[] = {{"demo-fund-brl", A_BRL, 1000000}, {"demo-fund-usdc", A_USDC, 100000000}};
     for (int i = 0; i < 2; i++) {
         int existed = find_idem(F[i].k) != NULL;
@@ -81,7 +88,7 @@ void m_load_demo(int64_t now) {
 Tx *m_receive_pix(int64_t cents, const char *from, int64_t now) {
     // O motor não confia no chamador: zero criaria uma transação vazia e negativo viraria um débito disfarçado.
     // The engine does not trust the caller: zero would create an empty transaction and a negative would be a hidden debit.
-    if (cents <= 0 || cents > MAX_AMOUNT) return NULL;
+    if (!now_ok(now) || cents <= 0 || cents > MAX_AMOUNT) return NULL;
     char k[48]; snprintf(k, sizeof k, "in-%lld-%u", (long long)now, ++M.seq);
     Tx *t = add(T_PIX_IN, k, now, A_NONE, 0, A_BRL, cents, 0, from);
     if (t) { advance(t, S_AUTHORIZED); advance(t, S_CONFIRMED); }
@@ -96,7 +103,8 @@ int64_t m_pix_spent_since(int64_t since) {
 
 Tx *m_prepare_pix(const char *dest, int64_t cents, int64_t now, const char **err) {
     if (M.emergency) { *err = "EMERGENCY MODE: financial operations locked."; return NULL; }
-    if (cents <= 0) { *err = "Invalid amount."; return NULL; }
+    if (!now_ok(now)) { *err = "Clock invalid. Nothing was moved."; return NULL; }
+    if (cents <= 0 || cents > MAX_AMOUNT) { *err = "Invalid amount."; return NULL; }
     if (!dest || strlen(dest) < 3) { *err = "Choose a recipient."; return NULL; }
     if (cents > m_balance(A_BRL)) { *err = "Insufficient BRL balance. Nothing was moved."; return NULL; }
     if (cents > M.pol.per_tx) { *err = "LIMITE: acima do teto por transação."; return NULL; }
@@ -124,7 +132,7 @@ static int swap_calc(int from, int to, int64_t amt, int64_t *out) {
 int m_quote(int from, int to, int64_t amt, int64_t now, Quote *q) {
     memset(q, 0, sizeof *q);
     int64_t out;
-    if (!swap_calc(from, to, amt, &out)) return 0;
+    if (!now_ok(now) || !swap_calc(from, to, amt, &out)) return 0;
     q->from = from; q->to = to; q->from_amt = amt; q->to_amt = out; q->rate = RATE; q->fee_brl = SERVICE_FEE; q->expires = now + QUOTE_TTL; q->ok = 1;
     snprintf(q->id, sizeof q->id, "q%u", ++M.seq);
     return 1;
@@ -139,6 +147,7 @@ static void pend_del(const char *id) { for (int i = 0; i < 8; i++) if (!strcmp(p
 Tx *m_prepare_swap(const Quote *q, int64_t now, const char **err) {
     if (M.emergency) { *err = "EMERGENCY MODE: financial operations locked."; return NULL; }
     if (!q || !q->ok) { *err = "Quote unavailable. Nothing was moved."; return NULL; }
+    if (!now_ok(now)) { *err = "Clock invalid. Nothing was moved."; return NULL; }
     if (now > q->expires) { *err = "Quote expired. Ask for a new one."; return NULL; }
     /* The engine does not trust a Quote the caller built: recompute it. Amounts, rate, fee and lifetime must be exactly
      * what m_quote would have produced (an earlier expiry is fine, a later one is not).
@@ -166,6 +175,7 @@ Level m_required(const Tx *t) { int64_t v = brl_value(t); return v <= M.pol.pin_
 
 const char *m_authorize(Tx *t, int64_t now) {
     if (t->st != S_AWAITING_AUTH) return "Transaction is not awaiting authorization.";
+    if (!now_ok(now)) return "Clock invalid. Nothing was moved.";       /* nothing is decided, and the grant stays / nada é decidido, e a concessão fica */
     if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); auth_consume(t->id); return "EMERGENCY MODE active."; }
     Level need = m_required(t);
     Level got = auth_peek(t->id, now);                 /* the proof comes from sec.c, not from the caller / a prova vem do sec.c, não do chamador */
@@ -227,7 +237,6 @@ size_t m_serialize(char *buf, size_t cap) {
 // m_deserialize is ALL-OR-NOTHING: if any line is invalid, the ledger stays EMPTY (m_init) and the reason is
 // in m_deserialize_error(). Before, bad lines were skipped and good ones kept: a corrupted state turned into
 // a plausible balance. It checks the version, the fields, the ranges, the currency coherence and the final balance.
-#define MAX_TIME   100000000000LL              // ~ano 5138 / ~year 5138
 static char des_err[96];
 const char *m_deserialize_error(void) { return des_err; }
 static int des_fail(const char *msg, int line) { snprintf(des_err, sizeof des_err, "linha %d: %s", line, msg); m_init(); return 0; }

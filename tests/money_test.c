@@ -306,6 +306,56 @@ int main(void) {
       m_init(); m_load_demo(t0); m_quote(A_BRL, A_USDC, 100000, t0, &hq); hq.expires = t0 + 5;
       CHECK("validade menor que a do motor e aceita", m_prepare_swap(&hq, t0, &e) != NULL); }
 
+
+    /* ---- N11: the engine takes the clock from the caller. A 'now' outside what the loader stores (0..1e11) made the engine
+     *      write a state it then refused to load (the whole ledger lost at the next boot), and now +/- a constant
+     *      overflowed at the extremes of int64. Reproduced on 32932dd. Every entry point refuses an invalid 'now'.
+     * ---- N11: o motor recebe o relógio do chamador. Um 'now' fora do que o carregador guarda (0..1e11) fazia o motor gravar
+     *      um estado que ele mesmo recusava ao carregar (o livro-razão inteiro perdido no boot seguinte), e now +/- uma
+     *      constante estourava nos extremos do int64. Reproduzido no 32932dd. Toda entrada recusa um 'now' inválido. ---- */
+    { const int64_t MAXNOW = 100000000000LL - 20;                     /* MAX_TIME - quote lifetime / MAX_TIME - validade da cotação */
+      const int64_t BAD[] = { -1, INT64_MIN, INT64_MIN + 1, MAXNOW + 1, 100000000001LL, 1700000000000LL, INT64_MAX - 10, INT64_MAX };
+      const char *e = NULL; Quote q; static char big[200000];
+      for (unsigned i = 0; i < sizeof BAD / sizeof *BAD; i++) {
+          int64_t bn = BAD[i]; char nm[96];
+          m_init(); m_load_demo(1000); m_receive_pix(500000, "x", 1000); m_quote(A_BRL, A_USDC, 100000, 1000, &q);
+          int n0 = M.n; int64_t b0 = m_balance(A_BRL), u0 = m_balance(A_USDC);
+          snprintf(nm, sizeof nm, "now=%lld: m_receive_pix recusa", (long long)bn);              CHECK(nm, m_receive_pix(5000, "x", bn) == NULL);
+          snprintf(nm, sizeof nm, "now=%lld: m_prepare_pix recusa", (long long)bn);              CHECK(nm, m_prepare_pix("Maria", 1000, bn, &e) == NULL && e && e[0]);
+          snprintf(nm, sizeof nm, "now=%lld: m_quote recusa", (long long)bn);                    { Quote q2; CHECK(nm, !m_quote(A_BRL, A_USDC, 100000, bn, &q2) && !q2.ok); }
+          snprintf(nm, sizeof nm, "now=%lld: m_prepare_swap recusa", (long long)bn);             CHECK(nm, m_prepare_swap(&q, bn, &e) == NULL);
+          m_load_demo(bn);
+          snprintf(nm, sizeof nm, "now=%lld: nada foi criado e os saldos nao mexeram", (long long)bn); CHECK(nm, M.n == n0 && m_balance(A_BRL) == b0 && m_balance(A_USDC) == u0);
+          snprintf(nm, sizeof nm, "now=%lld: o estado gravado volta a ser aceito pelo carregador", (long long)bn);
+          m_serialize(big, sizeof big); CHECK(nm, m_deserialize(big));
+      }
+      /* m_authorize with an invalid clock: refuses, keeps the transaction waiting and keeps the grant / recusa, mantém a transação e a concessão */
+      m_init(); m_load_demo(1000); M.pol.cooldown_s = 0;
+      { Tx *t = m_prepare_pix("Maria", 1000, 1000, &e); auth_expect(t->id); pin_check("123456", 1001);
+        CHECK("m_authorize com relogio invalido recusa", m_authorize(t, -1) != NULL && t->st == S_AWAITING_AUTH);
+        CHECK("m_authorize com INT64_MIN nao estoura nem decide", m_authorize(t, INT64_MIN) != NULL && t->st == S_AWAITING_AUTH);
+        CHECK("a concessao segue valendo depois do relogio invalido", auth_peek(t->id, 1002) == L_PIN && m_authorize(t, 1002) == NULL && t->st == S_CONFIRMED); }
+      /* the edges are valid, and what the engine writes there loads back / as bordas são válidas e o que o motor grava nelas volta */
+      m_init(); m_load_demo(0);
+      CHECK("now=0 e valido: financiamento criado em 0", M.n == 2 && M.tx[0].created == 0);
+      m_serialize(big, sizeof big); CHECK("now=0: recarrega", m_deserialize(big) && M.n == 2);
+      m_init(); m_load_demo(MAXNOW); m_receive_pix(5000, "x", MAXNOW);
+      CHECK("now=MAX_TIME-20 e valido", M.n == 3 && m_balance(A_BRL) == 1000000 + 5000);
+      CHECK("now=MAX_TIME-20: m_quote ok e expira dentro do que o carregador aceita", m_quote(A_BRL, A_USDC, 100000, MAXNOW, &q) && q.expires <= 100000000000LL);
+      { Tx *w = m_prepare_swap(&q, MAXNOW, &e); CHECK("now=MAX_TIME-20: swap preparado", w != NULL); M.pol.cooldown_s = 0; M.pol.confirm_max = INT64_C(1) << 40;
+        if (w) { auth_expect(w->id); pin_check("123456", MAXNOW); auth_confirm(w->id, MAXNOW); CHECK("now=MAX_TIME-20: swap autorizado e confirmado", m_authorize(w, MAXNOW) == NULL && w->st == S_CONFIRMED); } }
+      m_serialize(big, sizeof big); CHECK("now=MAX_TIME-20: o que o motor gravou volta", m_deserialize(big)); }
+
+    /* m_prepare_pix: an amount above the sanity cap is refused by the engine itself, whatever the policy says.
+     * m_prepare_pix: valor acima do teto de sanidade é recusado pelo próprio motor, seja qual for a política. */
+    { const char *e = NULL; static char big[200000];
+      m_init(); m_load_demo(1000); for (int i = 0; i < 4; i++) m_receive_pix(MAX_AMOUNT, "J", 1000);
+      M.pol.per_tx = M.pol.daily = INT64_MAX / 4;
+      CHECK("pix de 2.5e15 com politica gigante e recusado", m_prepare_pix("Maria", 2500000000000000LL, 1000, &e) == NULL && e && e[0]);
+      CHECK("pix de MAX_AMOUNT + 1 e recusado", m_prepare_pix("Maria", MAX_AMOUNT + 1, 1000, &e) == NULL);
+      CHECK("pix de MAX_AMOUNT passa (e e o maior que o carregador aceita)", m_prepare_pix("Maria", MAX_AMOUNT, 1000, &e) != NULL);
+      m_serialize(big, sizeof big); CHECK("o que o motor gravou volta, pix no teto incluido", m_deserialize(big)); }
+
     printf(fails ? "%d FALHAS\n" : "TODOS OK\n", fails);
     return fails != 0;
 }
