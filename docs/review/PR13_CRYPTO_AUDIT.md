@@ -186,3 +186,19 @@ Resultados reais da suíte: ver `docs/GITHUB_MAINTENANCE_REVIEW.md`, seção 6.
 5. Mesclar o #15 (sal sem plano B) **depois** deste.
 
 A issue **#2** fica **aberta**: o critério "KDF forte mesclado e medido no aparelho" não foi cumprido.
+
+## 12. Adendo da rodada 3 / Round 3 addendum
+
+**Decisão mantida: REQUEST CHANGES.** Nada na rodada 3 muda a decisão: continuam faltando a revisão humana independente de `init/sec.c` e a medição
+no X669C (HW-07). O #13 **não** foi mesclado nem alterado.
+
+1. **Reprodução na `main`:** `pin_check` com `now` fora de faixa, contador `int` perto de `INT_MAX` e o prazo absoluto do bloqueio ao trocar de domínio
+   de relógio foram reproduzidos em `32932dd`. O contador do estado (A-1) já está corrigido no #13; o bloqueio entre domínios de relógio e o `now`
+   fora de faixa estão corrigidos na branch `fix/pin-lockout-bounded-clock` (`9e74f13`), que **toca `sec.c` e vai conflitar com o #13** (resolver
+   mesclando a `main` na branch, sem reescrever histórico).
+2. **Chave de estado:** `pin_state_key()` continua sem nenhum consumidor. A proposta em `docs/STATE_INTEGRITY.md` diz o que ela daria (MAC do livro-razão) e,
+   explicitamente, o que **não** daria (contador, verificador, rollback).
+3. **Novos itens para o #13:** (a) a ordem de mesclagem recomendada é #13 → depois a branch do bloqueio, e não o contrário; (b) o teste `ui_test.c` usa
+   o `plat_random` da `main` e precisa seguir a assinatura do #15; (c) o custo do scrypt no aparelho segue como HW-07.
+4. **Critério para sair de REQUEST CHANGES:** itens 1 a 5 da seção 11 (revisão independente, medição no X669C, decisão sobre downgrade, teste de
+   queda de energia na migração, ordem com o #15).
