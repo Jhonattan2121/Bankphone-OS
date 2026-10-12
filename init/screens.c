@@ -14,6 +14,7 @@
 #include "components.h"
 #include "icons.h"
 #include "money.h"
+#include "amounts.h"
 #include "sec.h"
 #include "hw.h"
 #include "store.h"
@@ -36,7 +37,8 @@ static const char *env_name(void) { return "DEMO"; }   /* até existir parceiro/
 /* valor em USDC equivalente, pela taxa DEMO (declarada na tela) */
 static void approx_usdc(char *out, size_t n, int64_t brl_cents)
 {
-    int64_t usdc_micro = brl_cents * 1000000 / 560;     /* 1 USDC = R$ 5,60 (DEMO) */
+    int64_t usdc_micro;                                  /* 1 USDC = R$ 5,60 (DEMO) */
+    if (!usdc_micro_from_brl(brl_cents, &usdc_micro)) { snprintf(out, n, "valor grande demais"); return; }   /* never wraps / nunca dá a volta */
     fmt_money(out, n, A_USDC, usdc_micro);
 }
 
@@ -461,7 +463,7 @@ static int scr_developer(int scroll)
     y += dev_row(y, x, w, "Vibração", hw_state_str(HW.vib.st), st_color(HW.vib.st), "%s", HW.vib.why);
     if (HW.vib.st == HW_AVAILABLE)
         y += dev_row(y, x, w, "", "", TH_TXT3, "estilo %d · %d escrita(s) nesta execução", HW.vib_style, HW.vib_writes);
-    y += dev_row(y, x, w, "Tela", hw_state_str(HW.scr.st), st_color(HW.scr.st), "%.40s · %dx%d bpp=%d stride=%.0d B",
+    y += dev_row(y, x, w, "Tela", hw_state_str(HW.scr.st), st_color(HW.scr.st), "%.40s · %dx%d bpp=%d stride=%d B",
                  HW.fb_node, HW.scr_w, HW.scr_h, HW.scr_bpp, HW.scr_stride);
     y += dev_row(y, x, w, "Toque", hw_state_str(HW.touch.st), st_color(HW.touch.st), "%s '%s'",
                  HW.touch_node[0] ? HW.touch_node : "-", HW.touch_name[0] ? HW.touch_name : "-");

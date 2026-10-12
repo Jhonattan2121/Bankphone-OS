@@ -106,7 +106,7 @@ static void sheet_amount(void)
         y += TH_DP(TH_F_XS) + TH_DP(TH_SP2);
     }
 
-    int val = sheet_amt_value(asset);
+    int64_t val = sheet_amt_value(asset);
     if (SH.amt_mode == 1) {
         ui_hit_add(x, y, w, TH_DP(TH_H_LISTA), ACT_FLIP, 0);
         comp_label_c(th_W / 2, y + TH_DP(TH_SP2), "tocar para inverter a direção", TH_ACC, TH_DP(TH_F_XS), TH_W_REG);
@@ -188,6 +188,10 @@ static void sheet_pin(void)
     y += TH_DP(TH_F_CAPS) + TH_DP(TH_SP5);
     comp_dots(th_W / 2, y + TH_DP(TH_SP1), SH.pin_len, 6);
     y += TH_DP(TH_SP6);
+    /* SH.locked_s was never assigned, so the sheet showed no countdown and silently swallowed the right PIN during a lockout. It is read from the
+     * source of truth on every draw. / O SH.locked_s nunca era atribuído, então a folha não mostrava contagem e engolia o PIN certo durante um
+     * bloqueio. Agora é lido da fonte da verdade a cada desenho. */
+    { int64_t ls = pin_locked_s(plat_now()); SH.locked_s = ls > 100000000 ? 100000000 : (int)ls; }
     if (SH.locked_s > 0) {
         char l[64];
         snprintf(l, sizeof l, "Bloqueado. Tente de novo em %d s", SH.locked_s);

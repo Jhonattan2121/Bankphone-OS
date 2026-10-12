@@ -77,7 +77,7 @@ extern SheetState SH;
 extern const char *SHEET_CONTACTS[3];
 int  sheet_pend_tx(void);          /* índice pendente de autorização, ou -1  */
 int  sheet_rcpt_tx(void);          /* índice do comprovante, ou -1            */
-int  sheet_amt_value(int asset);
+int64_t sheet_amt_value(int asset);   /* int64: a USDC amount from 214749 typed digits wrapped in an int / um valor em USDC a partir de 214749 dígitos dava a volta num int */
 void sheet_amt_str(char *o, size_t n, int asset);
 
 /* gancho de teste (host): acha um alvo registrado no quadro atual */

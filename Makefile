@@ -28,7 +28,7 @@ TESTS := money sec devcmd store cmdline lockgeom
 # compilam no Linux. O resto compila também no macOS.
 UNAME := $(shell uname -s)
 ifeq ($(UNAME),Linux)
-TESTS += touchcore bootdiag_fb
+TESTS += touchcore bootdiag_fb ui
 else
 $(info note: touchcore and bootdiag_fb need Linux headers and are skipped on $(UNAME) / precisam de headers do Linux e foram puladas no $(UNAME))
 endif
@@ -44,6 +44,9 @@ FLAGS_lockgeom  := -Iinit
 SRC_store       := init/tests/test_store.c init/store.c init/sec.c
 FLAGS_store     := -DBANKPHONE_STORE_TEST
 LIBS_store      := -lm
+SRC_ui          := tests/ui_test.c init/ui.c init/screens.c init/sheets.c init/components.c init/icons.c init/hw.c init/gfx.c init/money.c init/sec.c init/store.c
+FLAGS_ui        := -Iinit
+LIBS_ui         := -lm
 SRC_touchcore   := init/tests/test_touchcore.c
 SRC_bootdiag_fb := init/tests/test_bootdiag_fb.c init/bootdiag.c
 FLAGS_bootdiag_fb := -Iinit
@@ -88,7 +91,7 @@ test: $(BINS)
 	  case " $(SCRIPT_TESTS) " in *" $$t "*) cmd="sh tests/scripts/$${t}_test.sh" ;; *) cmd="$(BUILD)/$$t" ;; esac; \
 	  if $$cmd > $$log 2>&1; then r=ok; else r=FALHOU; fail=1; fi; \
 	  n=; case $$t in \
-	    money|sec|devcmd|cmdline|lockgeom|boot_b) n=$$(grep -c '^PASS' $$log) ;; \
+	    money|sec|devcmd|cmdline|lockgeom|ui|boot_b) n=$$(grep -c '^PASS' $$log) ;; \
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
