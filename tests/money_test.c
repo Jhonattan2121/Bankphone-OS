@@ -356,6 +356,51 @@ int main(void) {
       CHECK("pix de MAX_AMOUNT passa (e e o maior que o carregador aceita)", m_prepare_pix("Maria", MAX_AMOUNT, 1000, &e) != NULL);
       m_serialize(big, sizeof big); CHECK("o que o motor gravou volta, pix no teto incluido", m_deserialize(big)); }
 
+
+    /* ---- N11: the table of pending swap quotes. It held 8 entries, silently ignored a ninth, was not cleared by m_init and
+     *      was not freed on every way a swap ends. Reproduced on 32932dd: the 9th swap prepared "expired" at once with no
+     *      explanation, and after 8 abandoned swaps and a reset every later swap failed with "Quote expired".
+     * ---- N11: a tabela de cotações de swap pendentes. Tinha 8 vagas, ignorava a nona em silêncio, não era limpa pelo m_init e
+     *      não era liberada em todo fim de swap. Reproduzido no 32932dd: o 9º swap preparado "expirava" na hora, sem explicação,
+     *      e depois de 8 swaps abandonados e um reset todo swap seguinte falhava com "Quote expired". ---- */
+    { const char *e = NULL; Quote q; int64_t t0 = 5000;
+      #define FRESH() do { m_init(); m_load_demo(t0); M.pol.cooldown_s = 0; M.pol.pin_max = M.pol.confirm_max = M.pol.per_tx = M.pol.daily = INT64_C(1) << 50; } while (0)
+      FRESH(); Tx *sw[MAX_PENDING_SWAPS + 2]; int ok = 0;
+      for (int i = 0; i < MAX_PENDING_SWAPS; i++) { m_quote(A_BRL, A_USDC, 10000 + i, t0, &q); sw[i] = m_prepare_swap(&q, t0, &e); ok += sw[i] != NULL; }
+      CHECK("ate o limite de swaps pendentes, todos sao preparados", ok == MAX_PENDING_SWAPS);
+      int n_before = M.n; m_quote(A_BRL, A_USDC, 20000, t0, &q);
+      CHECK("o swap alem do limite e recusado ao preparar, com motivo", m_prepare_swap(&q, t0, &e) == NULL && e && e[0] && M.n == n_before);
+      { Tx *a = sw[0]; auth_expect(a->id); pin_check("123456", t0 + 1); auth_confirm(a->id, t0 + 1);
+        CHECK("os que ja estavam pendentes continuam autorizando", m_authorize(a, t0 + 1) == NULL && a->st == S_CONFIRMED); }
+      CHECK("terminar um swap libera a vaga: o proximo cabe", m_prepare_swap(&q, t0, &e) != NULL);
+      m_cancel(sw[1], t0); m_quote(A_BRL, A_USDC, 30000, t0, &q);
+      CHECK("cancelar um swap libera a vaga", m_prepare_swap(&q, t0, &e) != NULL);
+      /* expired quotes give their slots back / cotações vencidas devolvem a vaga */
+      FRESH(); ok = 0;
+      for (int i = 0; i < MAX_PENDING_SWAPS; i++) { m_quote(A_BRL, A_USDC, 10000 + i, t0, &q); ok += m_prepare_swap(&q, t0, &e) != NULL; }
+      m_quote(A_BRL, A_USDC, 20000, t0 + 25, &q);
+      CHECK("com todas as cotacoes vencidas, o proximo swap cabe", ok == MAX_PENDING_SWAPS && m_prepare_swap(&q, t0 + 25, &e) != NULL);
+      /* m_init clears the table: abandoned swaps do not poison the next ledger / o m_init limpa a tabela */
+      FRESH(); for (int i = 0; i < MAX_PENDING_SWAPS; i++) { m_quote(A_BRL, A_USDC, 10000 + i, t0, &q); m_prepare_swap(&q, t0, &e); }
+      FRESH(); { int64_t t1 = t0 + 500; m_quote(A_BRL, A_USDC, 20000, t1, &q); Tx *f = m_prepare_swap(&q, t1, &e);
+                 CHECK("depois de m_init com 8 swaps abandonados, um swap novo e preparado", f != NULL);
+                 if (f) { auth_expect(f->id); pin_check("123456", t1 + 1); auth_confirm(f->id, t1 + 1);
+                          CHECK("... e autorizado, sem 'Quote expired'", m_authorize(f, t1 + 1) == NULL && f->st == S_CONFIRMED); } }
+      /* m_deserialize also starts from a clean table / o m_deserialize também começa de tabela limpa */
+      FRESH(); for (int i = 0; i < MAX_PENDING_SWAPS; i++) { m_quote(A_BRL, A_USDC, 10000 + i, t0, &q); m_prepare_swap(&q, t0, &e); }
+      m_deserialize("V1 1 0\n"); m_load_demo(t0 + 500);
+      { int64_t t1 = t0 + 500; m_quote(A_BRL, A_USDC, 20000, t1, &q); Tx *f = m_prepare_swap(&q, t1, &e);
+        CHECK("depois de recarregar o estado, a tabela esta limpa", f != NULL); }
+      /* every way a swap ends frees its slot: here, a swap that fails for lack of balance and one that fails in Emergency Mode */
+      FRESH(); for (int i = 0; i < MAX_PENDING_SWAPS - 1; i++) { m_quote(A_BRL, A_USDC, 10000 + i, t0, &q); m_prepare_swap(&q, t0, &e); }
+      m_quote(A_BRL, A_USDC, 20000, t0, &q); Tx *dying = m_prepare_swap(&q, t0, &e);
+      M.emergency = 1; auth_expect(dying->id); pin_check("123456", t0 + 1);
+      CHECK("swap que falha por emergencia", m_authorize(dying, t0 + 1) != NULL && dying->st == S_FAILED);
+      M.emergency = 0; m_quote(A_BRL, A_USDC, 25000, t0, &q);
+      CHECK("... libera a vaga", m_prepare_swap(&q, t0, &e) != NULL);
+      #undef FRESH
+    }
+
     printf(fails ? "%d FALHAS\n" : "TODOS OK\n", fails);
     return fails != 0;
 }

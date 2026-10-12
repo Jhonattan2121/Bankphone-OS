@@ -51,8 +51,28 @@ const char *m_state_name(TxState s) {
     return N[s];
 }
 
+// cotação ativa de cada swap pendente (por id da tx) / the live quote of each pending swap (by tx id)
+// A swap that is not decided keeps one slot until it is decided, cancelled or its quote expires; expired slots are given back.
+// Um swap não decidido ocupa uma vaga até ser decidido, cancelado ou a cotação vencer; vagas vencidas são devolvidas.
+static struct { char id[12]; int64_t expires; } pend[MAX_PENDING_SWAPS];
+static void pend_clear(void) { memset(pend, 0, sizeof pend); }
+static int64_t pend_get(const char *id) { for (int i = 0; i < MAX_PENDING_SWAPS; i++) if (!strcmp(pend[i].id, id)) return pend[i].expires; return -1; }
+static void pend_del(const char *id) { for (int i = 0; i < MAX_PENDING_SWAPS; i++) if (pend[i].id[0] && !strcmp(pend[i].id, id)) pend[i].id[0] = 0; }
+static int pend_room(int64_t now) { for (int i = 0; i < MAX_PENDING_SWAPS; i++) if (!pend[i].id[0] || now > pend[i].expires) return 1; return 0; }
+static int pend_set(const char *id, int64_t e, int64_t now) {
+    int free_slot = -1;
+    for (int i = 0; i < MAX_PENDING_SWAPS; i++) {
+        if (!pend[i].id[0]) { if (free_slot < 0) free_slot = i; continue; }
+        if (!strcmp(pend[i].id, id)) { pend[i].expires = e; return 1; }                   /* a replay updates, never duplicates / uma repetição atualiza, nunca duplica */
+        if (now > pend[i].expires) { pend[i].id[0] = 0; if (free_slot < 0) free_slot = i; }   /* expired: the slot comes back / vencida: a vaga volta */
+    }
+    if (free_slot < 0) return 0;
+    snprintf(pend[free_slot].id, sizeof pend[free_slot].id, "%s", id); pend[free_slot].expires = e; return 1;
+}
+
 void m_init(void) {
     memset(&M, 0, sizeof M);
+    pend_clear();                 /* the table lives outside M: it must be reset with it / a tabela vive fora do M: tem de ser zerada junto */
     M.pol.pin_max = 50000; M.pol.confirm_max = 500000; M.pol.per_tx = 200000; M.pol.daily = 500000; M.pol.cooldown_s = 30;
 }
 
@@ -138,12 +158,6 @@ int m_quote(int from, int to, int64_t amt, int64_t now, Quote *q) {
     return 1;
 }
 
-// cotação ativa de cada swap pendente (por id da tx)
-static struct { char id[12]; int64_t expires; } pend[8];
-static void pend_set(const char *id, int64_t e) { for (int i = 0; i < 8; i++) if (!pend[i].id[0]) { snprintf(pend[i].id, 12, "%s", id); pend[i].expires = e; return; } }
-static int64_t pend_get(const char *id) { for (int i = 0; i < 8; i++) if (!strcmp(pend[i].id, id)) return pend[i].expires; return -1; }
-static void pend_del(const char *id) { for (int i = 0; i < 8; i++) if (!strcmp(pend[i].id, id)) pend[i].id[0] = 0; }
-
 Tx *m_prepare_swap(const Quote *q, int64_t now, const char **err) {
     if (M.emergency) { *err = "EMERGENCY MODE: financial operations locked."; return NULL; }
     if (!q || !q->ok) { *err = "Quote unavailable. Nothing was moved."; return NULL; }
@@ -159,10 +173,13 @@ Tx *m_prepare_swap(const Quote *q, int64_t now, const char **err) {
     if (q->from_amt > m_balance(q->from)) { *err = "Insufficient balance. Nothing was moved."; return NULL; }
     char k[48], cp[40]; snprintf(k, sizeof k, "swap-%s-%lld", q->id, (long long)now);
     snprintf(cp, sizeof cp, "%s>%s", q->from == A_BRL ? "BRL" : "USDC", q->to == A_BRL ? "BRL" : "USDC");
+    /* No room in the table: say so now, before anything is created. It used to be ignored, and the swap "expired" at once.
+     * Sem vaga na tabela: diz agora, antes de criar qualquer coisa. Antes era ignorado e o swap "expirava" na hora. */
+    if (!find_idem(k) && !pend_room(now)) { *err = "Too many swaps waiting. Finish or cancel one first."; return NULL; }
     Tx *t = add(T_SWAP, k, now, q->from, q->from_amt, q->to, q->to_amt, q->fee_brl, cp);
     if (!t) { *err = "Ledger full."; return NULL; }
     advance(t, S_QUOTED); advance(t, S_AWAITING_AUTH);
-    pend_set(t->id, q->expires);
+    if (t->st == S_AWAITING_AUTH) pend_set(t->id, q->expires, now);   /* only a swap that is still waiting holds a slot / só um swap ainda esperando ocupa vaga */
     return t;
 }
 
@@ -176,14 +193,14 @@ Level m_required(const Tx *t) { int64_t v = brl_value(t); return v <= M.pol.pin_
 const char *m_authorize(Tx *t, int64_t now) {
     if (t->st != S_AWAITING_AUTH) return "Transaction is not awaiting authorization.";
     if (!now_ok(now)) return "Clock invalid. Nothing was moved.";       /* nothing is decided, and the grant stays / nada é decidido, e a concessão fica */
-    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); auth_consume(t->id); return "EMERGENCY MODE active."; }
+    if (M.emergency) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Emergency Mode"); auth_consume(t->id); pend_del(t->id); return "EMERGENCY MODE active."; }
     Level need = m_required(t);
     Level got = auth_peek(t->id, now);                 /* the proof comes from sec.c, not from the caller / a prova vem do sec.c, não do chamador */
     if (got == L_NONE) return "Authentication required: enter your PIN.";
     if (got < need) return "Stronger authorization required.";
     if (need == L_COOLDOWN && now - t->created < M.pol.cooldown_s) return "ESPERA: aguarde antes de autorizar.";
     if (t->type == T_SWAP) { int64_t e = pend_get(t->id); if (e < 0 || now > e) { advance(t, S_EXPIRED); pend_del(t->id); auth_consume(t->id); return "Quote expired. Nothing was moved."; } }
-    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); auth_consume(t->id); return "Insufficient balance. Nothing was moved."; }
+    if (t->from != A_NONE && t->from_amt > m_balance(t->from)) { advance(t, S_FAILED); snprintf(t->fail, sizeof t->fail, "Insufficient balance"); auth_consume(t->id); pend_del(t->id); return "Insufficient balance. Nothing was moved."; }
     advance(t, S_AUTHORIZED);
     auth_consume(t->id);                               /* single use / uso único */
     if (t->type == T_PIX_OUT) {

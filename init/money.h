@@ -19,6 +19,7 @@ typedef enum { S_CREATED, S_QUOTED, S_AWAITING_AUTH, S_AUTHORIZED, S_SIGNED, S_B
 #define MAX_AMOUNT     1000000000000000LL   /* 1e15: sanity cap for any stored amount / teto de sanidade de qualquer valor gravado */
 #define MAX_SWAP_BRL   100000000000LL       /* 1e11 cents  = R$ 1.000.000.000,00 (same as the UI's typed cap) */
 #define MAX_SWAP_USDC  100000000000000LL    /* 1e14 micro  = 100.000.000 USDC */
+#define MAX_PENDING_SWAPS 8                 /* swap quotes waiting at the same time / cotações de swap esperando ao mesmo tempo */
 #define MAX_TIME       100000000000LL       /* 1e11 s ~ year 5138: the largest time the loader stores / o maior tempo que o carregador guarda */
 typedef struct {
     char id[12], idem[48], cp[40], fail[96], hash[72];   // hash vazio = sem transação on-chain
