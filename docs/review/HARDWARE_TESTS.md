@@ -41,6 +41,20 @@ no repositório) · `VERIFICADO` (log + foto/captura arquivados no repositório)
 
 | HW-14 | Comandos `SCREENSHOT` e `TOUCH` por USB (commit `f80968d`, só imagens de teste com `bankphone.devcmd=1`) | Rodar `tools/screenshot.py` com uma imagem de teste; conferir que a captura tem o marcador de fim e bate com a tela | PNG igual à tela; quadro sem marcador de fim é recusado | PNG + log do host + comando usado | **NÃO VERIFICADO**; o commit só declara testes no computador (parser com 38 verificações) | N10 |
 
+## Linhas adicionadas na rodada 3 / Rows added in round 3
+
+Todas **NÃO VERIFICADO**. Nenhuma pede gravação automática.
+
+| ID | O que provar | Procedimento (resumo) | Resultado esperado | Evidência necessária | Ligado a |
+|---|---|---|---|---|---|
+| HW-15 | Fonte do relógio e salto entre domínios (relógio real × uptime) | Ligar sem rede, anotar `plat_clock_valid()` e `plat_now()` por 10 min; depois com o relógio acertado; reiniciar | Registrar a transição e a ordem de grandeza (≈ 1,7e9 contra segundos de uptime) | Log serial com marcas | O-2, O-3, `fix/pin-lockout-bounded-clock` |
+| HW-16 | Bloqueio do PIN ao reiniciar durante o bloqueio | Errar o PIN 5 vezes, reiniciar em seguida (com e sem relógio válido); medir quanto falta | O bloqueio nunca passa de 1920 s e acaba sozinho | Log + foto da contagem na tela | `fix/pin-lockout-bounded-clock`, HW-11 |
+| HW-17 | Contagem do bloqueio na tela de PIN | Provocar o bloqueio na tela de autorização de swap e na tela de desbloqueio | A contagem decresce na folha de PIN, não só no desbloqueio | Fotos em 3 instantes | `fix/ui-input-and-display` |
+| HW-18 | Tabela de toques com um livro-razão longo | Carregar um estado de teste com 300+ linhas (cópia, nunca o estado real) e abrir a Atividade | A barra de abas e a engrenagem continuam respondendo ao toque | Vídeo curto ou fotos | `fix/ui-input-and-display` |
+| HW-19 | Leitura de `/proc/cmdline` maior que o buffer | Imagem de teste com cmdline longa (>4 KiB) e `bankphone.ro=1` no fim | A imagem se comporta como somente leitura (falha fechada) | Log do boot + hash da região de estado antes/depois | `fix/cmdline-truncation-fails-closed` |
+
+Ordem: HW-15 antes de HW-16, que depende do domínio do relógio medido.
+
 ## O que **não** é teste de aparelho / What does not need the phone
 
 Os itens abaixo se verificam no computador e já têm testes de host: lógica do motor financeiro, parser da
