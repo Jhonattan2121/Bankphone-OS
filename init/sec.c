@@ -21,6 +21,7 @@ static void auth_on_pin_ok(int64_t now) {
 }
 static int grant_ok(const char *tx_id, int64_t now) {
     if (!G.live || !tx_id || strcmp(G.id, tx_id)) return 0;
+    if (now < 0 || now > SEC_NOW_MAX) return 0;                         /* a clock out of range grants nothing, and does not wipe the grant / relógio fora da faixa não concede, e não apaga a concessão */
     if (now < G.at || now - G.at > AUTH_TTL_S) { grant_wipe(); return 0; }   /* expired, or the clock went backwards / vencida, ou o relógio voltou */
     return 1;
 }
@@ -69,15 +70,32 @@ void pin_derive(const char *pin, const uint8_t salt[16], uint8_t out[32]) {
 
 void pin_set(const char *pin, const uint8_t salt[16]) { memcpy(PIN.salt, salt, 16); pin_derive(pin, salt, PIN.hash); PIN.set = 1; PIN.fails = 0; PIN.locked_until = 0; }
 
+/* Anchor a deadline that came from the other clock, ONCE: the first time it is seen it becomes at most PIN_LOCK_MAX_S from now, and after that
+ * it is ordinary (it is never pushed forward again, or a lock would slide for as long as the foreign deadline lasts). now must be in range.
+ * Ancora UMA vez um prazo que veio do outro relógio: na primeira vez que é visto ele passa a ficar no máximo PIN_LOCK_MAX_S à frente de now, e depois
+ * é comum (nunca é empurrado de novo, senão o bloqueio deslizaria enquanto durasse o prazo do outro relógio). now precisa estar na faixa. */
+static void lock_anchor(int64_t now) { if (PIN.locked_until > now + PIN_LOCK_MAX_S) PIN.locked_until = now + PIN_LOCK_MAX_S; }
+
 int pin_check(const char *pin, int64_t now) {
+    if (now < 0 || now > SEC_NOW_MAX) return 2;         /* a clock the code cannot use: refused, nothing changes / relógio inutilizável: recusado, nada muda */
+    /* The counter and the deadline come from a file nobody authenticates, and the deadline may come from the other clock. Bring both into range. /
+     * O contador e o prazo vêm de um arquivo que ninguém autentica, e o prazo pode vir do outro relógio. Traz os dois para a faixa. */
+    if (PIN.fails < 0) PIN.fails = 0; else if (PIN.fails > PIN_MAX_FAILS) PIN.fails = PIN_MAX_FAILS;
+    lock_anchor(now);
     if (now < PIN.locked_until) return 2;
     uint8_t h[32]; pin_derive(pin, PIN.salt, h);
     uint8_t diff = 0; for (int i = 0; i < 32; i++) diff |= h[i] ^ PIN.hash[i];
     if (!diff) { PIN.fails = 0; auth_on_pin_ok(now); return 0; }   /* the ONLY place a grant is issued / o ÚNICO lugar que emite concessão */
-    if (++PIN.fails >= 5) { int e = PIN.fails - 5; if (e > 6) e = 6; PIN.locked_until = now + 30 * (1 << e); }
+    if (PIN.fails < PIN_MAX_FAILS) PIN.fails++;          /* saturate: signed overflow is undefined / satura: overflow com sinal é indefinido */
+    if (PIN.fails >= 5) { int e = PIN.fails - 5; if (e > 6) e = 6; PIN.locked_until = now + 30 * (1 << e); }
     return 1;
 }
-int64_t pin_locked_s(int64_t now) { return now < PIN.locked_until ? PIN.locked_until - now : 0; }
+int64_t pin_locked_s(int64_t now) {
+    if (now < 0 || now > SEC_NOW_MAX) return PIN_LOCK_MAX_S;                       /* unknown clock: report the worst case, consistent with pin_check refusing / relógio desconhecido: o pior caso, coerente com o pin_check recusar */
+    lock_anchor(now);                                                              /* the screen asks first: it anchors too / a tela pergunta primeiro: ancora também */
+    if (PIN.locked_until <= now) return 0;
+    return PIN.locked_until - now;                                                 /* in (0, PIN_LOCK_MAX_S]: cannot overflow / em (0, PIN_LOCK_MAX_S]: não estoura */
+}
 
 static void hex(char *o, const uint8_t *b, int n) { for (int i = 0; i < n; i++) sprintf(o + 2 * i, "%02x", b[i]); }
 static int unhex(uint8_t *o, const char *s, int n) { for (int i = 0; i < n; i++) { unsigned v; if (sscanf(s + 2 * i, "%2x", &v) != 1) return 0; o[i] = (uint8_t)v; } return 1; }
