@@ -33,7 +33,7 @@ static void check_invariants(int64_t now, const TxState *prev, int prev_n) {
     NEED(m_balance(A_BRL) >= 0);                                  /* never negative / nunca fica negativo */
     NEED(m_balance(A_USDC) >= 0);
     NEED(m_total_brl() >= 0);                                     /* no overflow wraps it negative / nenhum estouro o deixa negativo */
-    NEED(m_pix_spent_since(now - 86400) <= M.pol.daily);          /* daily cap / teto diário */
+    NEED(m_pix_spent_since(now < INT64_MIN + 86400 ? INT64_MIN : now - 86400) <= M.pol.daily);   /* daily cap, with a subtraction that cannot overflow / teto diário, com subtração que não estoura */
     for (int i = 0; i < M.n; i++) {
         const Tx *t = &M.tx[i];
         if (t->type == T_PIX_OUT) NEED(t->from_amt <= M.pol.per_tx);   /* per-Pix cap / teto por Pix */
@@ -139,7 +139,12 @@ static void run_ops(const uint8_t *d, size_t n) {
                 } break;
         case 4: if (M.n) { i++; t = &M.tx[idx]; authorize_op(t, d, n, &i, now); } break;
         case 5: if (M.n) { i++; m_cancel(&M.tx[idx], now); } break;
-        case 6: now += i < n ? (int64_t)d[i++] * 7 : 1; break;
+        case 6: { /* the clock: mostly small steps, sometimes an edge or an invalid value (N11): the engine must refuse what it cannot store
+                   * o relógio: em geral passos pequenos, às vezes uma borda ou um valor inválido (N11): o motor tem de recusar o que não consegue gravar */
+                  static const int64_t TE[] = { 0, 1, 1000, MAX_TIME - 21, MAX_TIME - 20, MAX_TIME - 19, MAX_TIME, MAX_TIME + 1, -1, INT64_MAX, INT64_MIN, INT64_MIN + 1, INT64_MAX - 5 };
+                  int mode = i < n ? d[i++] % 4 : 0;
+                  if (mode == 3) now = TE[(i < n ? d[i++] : 0) % (sizeof TE / sizeof *TE)];
+                  else if (now < MAX_TIME - 100000) now += i < n ? (int64_t)d[i++] * 7 : 1; } break;
         case 7: if (i < n) { uint8_t f = d[i++]; M.emergency = f & 1; M.pix_offline = (f >> 1) & 1; } break;
         case 8: { int before = M.n; m_load_demo(now); int mid = M.n; m_load_demo(now); NEED(M.n == mid); (void)before; } break;
         }
