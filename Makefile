@@ -50,7 +50,7 @@ FLAGS_bootdiag_fb := -Iinit
 
 # Testes de script (shell): tests/scripts/<nome>_test.sh, com programas externos FALSOS no PATH.
 # Shell-script tests: tests/scripts/<name>_test.sh, with FAKE external programs on PATH.
-SCRIPT_TESTS := boot_b
+SCRIPT_TESTS := boot_b image_tools
 
 HDRS := $(wildcard init/*.h)
 BINS := $(addprefix $(BUILD)/,$(TESTS))
@@ -92,6 +92,7 @@ test: $(BINS)
 	    store)            n=$$(sed -n 's/.*RESULTADO: \([0-9]*\) verifica.*/\1/p' $$log | tail -1) ;; \
 	    touchcore)        n=$$(sed -n 's/^\([0-9]*\) verificacoes.*/\1/p' $$log | tail -1) ;; \
 	    bootdiag_fb)      n=$$(grep -c '^  ok' $$log) ;; \
+	    image_tools)      n=$$(grep -c '^PASS' $$log) ;; \
 	  esac; \
 	  total=$$((total + $${n:-0})); \
 	  printf '%-12s %-7s %s verificacoes\n' $$t $$r "$${n:-?}"; \
