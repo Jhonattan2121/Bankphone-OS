@@ -66,3 +66,16 @@ static inline const char *cmdline_prop(const char *cl, const char *key)
     cmdline_get(cl, key, v, CMDLINE_VALUE_MAX);
     return v;
 }
+
+/* The lock must fail closed. `status` is what cmdline_load() said about the text (0 = read whole). If the text was cut or could not be
+ * read, the write lock bankphone.ro is reported as "1" whatever the visible part says, because the missing part may be the very token that
+ * sets it. Every other key keeps what the visible part gives (a cut value fails safe on its own: the store demands a full 16-digit hash).
+ * A trava tem de falhar fechada. `status` é o que o cmdline_load() disse do texto (0 = lido inteiro). Se o texto foi cortado ou não pôde ser
+ * lido, a trava de gravação bankphone.ro é informada como "1" seja o que for que a parte visível diga, porque a parte que falta pode ser
+ * justamente o token que a liga. As outras chaves mantêm o que a parte visível dá (um valor cortado falha seguro sozinho: o store exige o
+ * hash completo de 16 dígitos). */
+static inline const char *cmdline_prop_safe(const char *cl, int status, const char *key)
+{
+    if (status != 0 && key && !strcmp(key, "bankphone.ro")) return "1";
+    return cmdline_prop(cl, key);
+}

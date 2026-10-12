@@ -175,15 +175,22 @@ static long read_long(const char *path)
 static char cfg_part[24];
 static char cfg_hash[24];
 static char cfg_file[160];
+static int  cfg_toolong;                /* the requested name or path did not fit and was NOT shortened / o nome ou caminho pedido não coube e NÃO foi encurtado */
 
 void store_config(const char *state_spec, const char *expected_hash_hex)
 {
     memset(cfg_part, 0, sizeof cfg_part);
     memset(cfg_hash, 0, sizeof cfg_hash);
     memset(cfg_file, 0, sizeof cfg_file);
+    cfg_toolong = 0;
     ST.pedido = 0;
     if (!state_spec || !state_spec[0]) return;
     ST.pedido = 1;
+    /* A name that does not fit is REFUSED, never cut: a 24+ character request used to become its 23-character prefix, which
+     * could name a different partition. store_open() explains the refusal.
+     * Um nome que não cabe é RECUSADO, nunca cortado: um pedido de 24+ caracteres virava o prefixo de 23, que podia ser outra
+     * partição. O store_open() explica a recusa. */
+    if (!strncmp(state_spec, "file:", 5) ? strlen(state_spec + 5) >= sizeof cfg_file : strlen(state_spec) >= sizeof cfg_part) { cfg_toolong = 1; return; }
     if (!strncmp(state_spec, "file:", 5)) {
         /* backend de ARQUIVO: só para o teste de host (ver store.h) */
         snprintf(cfg_file, sizeof cfg_file, "%.*s", (int)sizeof cfg_file - 1, state_spec + 5);
@@ -225,6 +232,13 @@ int store_open(void)
         snprintf(ST.why, sizeof ST.why,
                  "persistência não pedida (falta 'bankphone.state=<partição>' na cmdline) — "
                  "o estado vive só na memória");
+        return -1;
+    }
+    if (cfg_toolong) {
+        snprintf(ST.why, sizeof ST.why,
+                 "o nome de 'bankphone.state' é longo demais (máximo %d caracteres para a partição, %d para um arquivo): recusado, não encurtado",
+                 (int)sizeof cfg_part - 1, (int)sizeof cfg_file - 1);
+        logf_("%s", ST.why);
         return -1;
     }
     if (cfg_file[0]) {

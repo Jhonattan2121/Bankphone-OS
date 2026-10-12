@@ -15,6 +15,7 @@
 #define _GNU_SOURCE
 #include "bootdiag.h"
 #include "cmdline.h"
+#include "cmdline_load.h"
 #include "devcmd.h"
 #include "gfx.h"
 #include "money.h"
@@ -920,9 +921,14 @@ const char *plat_boot_prop(const char *key)
 {
     /* O parsing (token inteiro, ordem livre, último vale, buffers que giram) está em cmdline.h, testado no host.
      * Parsing (whole token, any order, last wins, rotating buffers) lives in cmdline.h, host-tested. */
-    static char cl[4096]; static int got;
-    if (!got) { int f = open("/proc/cmdline", O_RDONLY); if (f >= 0) { ssize_t n = read(f, cl, sizeof cl - 1); cl[n > 0 ? n : 0] = 0; close(f); } got = 1; }
-    return cmdline_prop(cl, key);
+    static char cl[CMDLINE_MAX]; static int got, st;
+    if (!got) {
+        st = cmdline_load("/proc/cmdline", cl, sizeof cl); got = 1;
+        /* A cmdline cut short or unreadable is not "no lock": the missing part may be the token that sets it. The write lock fails closed.
+         * Uma cmdline cortada ou ilegível não é "sem trava": a parte que falta pode ser o token que a liga. A trava de gravação falha fechada. */
+        if (st != CMDLINE_OK) bd_log("cmdline: %s — bankphone.ro tratado como 1 (nenhuma gravação)", st == CMDLINE_TRUNCATED ? "cortada (maior que o buffer)" : "ilegível");
+    }
+    return cmdline_prop_safe(cl, st, key);
 }
 
 /* O store não conhece o bd_log: quem usa é que aponta o destino dos avisos. */
