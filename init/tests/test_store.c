@@ -405,6 +405,54 @@ int main(void)
         CHK(depois == antes, "descritores abertos: %d antes, %d depois", antes, depois);
     }
 
+    /* ------------------------------------------------------------- 17 -- */
+    printf("\n[17] com o slot mais novo de conteúdo ruim, a próxima gravação NUNCA toca o único slot bom\n"
+           "     the next save never touches the only good slot when the newest slot has a bad payload\n");
+    {
+        /* Reproduzido no 32932dd: o cabeçalho do slot A estava ok (seq maior) mas o conteúdo falhava no CRC; o slot B era bom.
+         * O store_load usava B, mas o store_save escolhia o slot de seq MENOR — o B, o único bom — e o sobrescrevia. Uma queda
+         * de energia nessa gravação deixava os dois slots inúteis e o estado se perdia.
+         * Reproduced on 32932dd: slot A had a good header (higher seq) but its payload failed the CRC; slot B was good. store_load
+         * used B, but store_save picked the slot with the LOWER seq - B, the only good one - and overwrote it. A power cut during that
+         * write left both slots useless and the state was lost. */
+        const char *NOVO = "P1|pin=1|tx=9|novo";
+        int perdeu = 0, quedas = 0;
+        for (int op = 1; op <= 2; op++) {
+            for (int k = 1; k <= 6; k++) {
+                mkpart(0); char hh[24]; regiao_hash(hh);
+                CHK(abrir(hh) == 0, "armar falhou: %s", ST.why);
+                CHK(store_save("P1|primeiro", 11) == 0 && store_save(B, strlen(B)) == 0 && store_save(A, strlen(A)) == 0, "gravar três estados falhou");
+                /* now: slot A holds seq 3 (A), slot B holds seq 2 (B). Corrupt the PAYLOAD of the newest (slot A), keep its header. */
+                { FILE *f = fopen(PATH, "r+b"); fseek(f, (long)(ST.base + 24 + 3), SEEK_SET); unsigned char x = 0x55; fwrite(&x, 1, 1, f); fclose(f); }
+                CHK(reiniciar() == 0, "reabrir falhou");
+                { char buf[512]; size_t n = 0; int r = store_load(buf, sizeof buf, &n); buf[n > 0 ? n : 0] = 0;
+                  CHK(r == 0 && !strcmp(buf, B), "op=%d k=%d: a carga deveria vir do slot B ('%s')", op, k, buf); }
+                store_heal();                                                  /* the same sequence main.c runs / a mesma sequência do main.c */
+                hook_arm(op, k);
+                int rc = store_save(NOVO, strlen(NOVO));
+                int fez = g_armed == 0; g_armed = 0; if (fez) quedas++;
+                CHK(reiniciar() == 0, "reabrir falhou");
+                char buf[512]; size_t n = 0; int r = store_load(buf, sizeof buf, &n); buf[n > 0 ? n : 0] = 0;
+                if (!(r == 0 && (!strcmp(buf, B) || !strcmp(buf, NOVO)))) perdeu++;
+                CHK(r == 0 && (!strcmp(buf, B) || !strcmp(buf, NOVO)),
+                    "op=%d k=%d (rc=%d): depois da queda o estado deveria ser B ou o novo, veio r=%d '%s'", op, k, rc, r, buf);
+            }
+        }
+        CHK(quedas >= 4, "o teste precisa disparar quedas (%d)", quedas);
+        CHK(perdeu == 0, "o estado se perdeu em %d das quedas", perdeu);
+        /* no fault: after the save the new state is what loads, and the repaired slot is good / sem falha: o estado novo é o que carrega */
+        mkpart(0); char h2[24]; regiao_hash(h2); abrir(h2);
+        store_save("P1|primeiro", 11); store_save(B, strlen(B)); store_save(A, strlen(A));
+        { FILE *f = fopen(PATH, "r+b"); fseek(f, (long)(ST.base + 24 + 3), SEEK_SET); unsigned char x = 0x55; fwrite(&x, 1, 1, f); fclose(f); }
+        reiniciar(); { char buf[512]; size_t n = 0; store_load(buf, sizeof buf, &n); }
+        store_heal();
+        CHK(store_save(NOVO, strlen(NOVO)) == 0, "a gravação normal deveria funcionar");
+        CHK(reiniciar() == 0, "reabrir falhou");
+        { char buf[512]; size_t n = 0; int r = store_load(buf, sizeof buf, &n); buf[n > 0 ? n : 0] = 0;
+          CHK(r == 0 && !strcmp(buf, NOVO), "sem queda, o estado novo é o que carrega ('%s')", buf);
+          CHK(ST.slot_ok[0] == 1 && ST.slot_ok[1] == 1, "depois de gravar, os dois slots voltam a ser bons (A=%d B=%d)", ST.slot_ok[0], ST.slot_ok[1]); }
+    }
+
     unlink(PATH);
     unlink("/tmp/bp-store-hash.txt");
 
