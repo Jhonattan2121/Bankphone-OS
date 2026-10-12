@@ -108,15 +108,23 @@ Tx *m_prepare_pix(const char *dest, int64_t cents, int64_t now, const char **err
     return t;
 }
 
-int m_quote(int from, int to, int64_t amt, int64_t now, Quote *q) {
-    memset(q, 0, sizeof *q);
+/* The ONE place a swap's output comes from. m_quote creates the quote with it and m_prepare_swap recomputes it, so a
+ * Quote the caller built or changed cannot pay out more (or less) than the engine's own formula.
+ * O ÚNICO lugar de onde sai o valor de um swap. O m_quote cria a cotação com ele e o m_prepare_swap o recalcula, então
+ * uma Quote montada ou alterada pelo chamador não paga mais (nem menos) do que a fórmula do próprio motor. */
+static int swap_calc(int from, int to, int64_t amt, int64_t *out) {
     if (amt <= 0 || from == to) return 0;
-    int64_t out;
     /* The caps are checked BEFORE the multiplication, so an input the arithmetic cannot take is refused, never computed.
      * Os tetos são conferidos ANTES da multiplicação: entrada que a conta não aguenta é recusada, nunca calculada. */
-    if (from == A_BRL && to == A_USDC) { if (amt > MAX_SWAP_BRL) return 0; int64_t net = amt - SERVICE_FEE; if (net <= 0) return 0; out = net * UNIT[A_USDC] / RATE; }
-    else if (from == A_USDC && to == A_BRL) { if (amt > MAX_SWAP_USDC) return 0; int64_t gross = usdc_to_brl(amt); out = gross - SERVICE_FEE; if (out <= 0) return 0; }
-    else return 0;
+    if (from == A_BRL && to == A_USDC) { if (amt > MAX_SWAP_BRL) return 0; int64_t net = amt - SERVICE_FEE; if (net <= 0) return 0; *out = net * UNIT[A_USDC] / RATE; return 1; }
+    if (from == A_USDC && to == A_BRL) { if (amt > MAX_SWAP_USDC) return 0; int64_t o = usdc_to_brl(amt) - SERVICE_FEE; if (o <= 0) return 0; *out = o; return 1; }
+    return 0;
+}
+
+int m_quote(int from, int to, int64_t amt, int64_t now, Quote *q) {
+    memset(q, 0, sizeof *q);
+    int64_t out;
+    if (!swap_calc(from, to, amt, &out)) return 0;
     q->from = from; q->to = to; q->from_amt = amt; q->to_amt = out; q->rate = RATE; q->fee_brl = SERVICE_FEE; q->expires = now + QUOTE_TTL; q->ok = 1;
     snprintf(q->id, sizeof q->id, "q%u", ++M.seq);
     return 1;
@@ -132,6 +140,13 @@ Tx *m_prepare_swap(const Quote *q, int64_t now, const char **err) {
     if (M.emergency) { *err = "EMERGENCY MODE: financial operations locked."; return NULL; }
     if (!q || !q->ok) { *err = "Quote unavailable. Nothing was moved."; return NULL; }
     if (now > q->expires) { *err = "Quote expired. Ask for a new one."; return NULL; }
+    /* The engine does not trust a Quote the caller built: recompute it. Amounts, rate, fee and lifetime must be exactly
+     * what m_quote would have produced (an earlier expiry is fine, a later one is not).
+     * O motor não confia numa Quote montada pelo chamador: recalcula. Valores, taxa, tarifa e validade têm de ser
+     * exatamente o que o m_quote produziria (validade menor serve, maior não). */
+    { int64_t expect;
+      if (!swap_calc(q->from, q->to, q->from_amt, &expect) || q->to_amt != expect || q->rate != RATE || q->fee_brl != SERVICE_FEE ||
+          q->expires > now + QUOTE_TTL) { *err = "Quote invalid. Nothing was moved."; return NULL; } }
     if (q->from_amt > m_balance(q->from)) { *err = "Insufficient balance. Nothing was moved."; return NULL; }
     char k[48], cp[40]; snprintf(k, sizeof k, "swap-%s-%lld", q->id, (long long)now);
     snprintf(cp, sizeof cp, "%s>%s", q->from == A_BRL ? "BRL" : "USDC", q->to == A_BRL ? "BRL" : "USDC");

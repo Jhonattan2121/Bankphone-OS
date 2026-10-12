@@ -263,6 +263,49 @@ int main(void) {
       m_init(); m_load_demo(now);
       CHECK("m_total_brl no demo: R$ 10.000 + 100 USDC = 1056000", m_total_brl() == 1000000 + 56000); }
 
+
+    /* ---- N11: the engine does not trust a Quote the caller built. Reproduced on 32932dd: a negative from_amt created
+     *      money, an inflated to_amt paid out 1e12 micro-USDC for R$ 1000, a one-year expiry never expired.
+     * ---- N11: o motor não confia numa Quote montada pelo chamador. Reproduzido no 32932dd: from_amt negativo criava
+     *      dinheiro, to_amt inflado pagava 1e12 micro-USDC por R$ 1000, validade de um ano nunca expirava. ---- */
+    { const char *e = NULL; int64_t t0 = 1000;
+      const int64_t good_out = (100000 - 350) * 1000000LL / 560;
+      struct { const char *name; Quote q; } F[] = {
+        { "from_amt negativo",            { .from = A_BRL,  .to = A_USDC, .from_amt = -100000, .to_amt = 100, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "from_amt zero",                { .from = A_BRL,  .to = A_USDC, .from_amt = 0, .to_amt = 0, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "to_amt inflado",               { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = 1000000000000LL, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "to_amt reduzido",              { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = good_out - 1, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "to_amt negativo",              { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = -5, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "taxa trocada",                 { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = good_out, .rate = 1, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "tarifa trocada",               { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = good_out, .rate = 560, .fee_brl = 0, .expires = t0 + 20, .ok = 1 } },
+        { "validade de um ano",           { .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = good_out, .rate = 560, .fee_brl = 350, .expires = t0 + 31536000, .ok = 1 } },
+        { "BRL para BRL",                 { .from = A_BRL,  .to = A_BRL,  .from_amt = 100000, .to_amt = 100000, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "moeda inexistente de origem",  { .from = 7,      .to = A_USDC, .from_amt = 100000, .to_amt = 5, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "moeda de destino none",        { .from = A_BRL,  .to = A_NONE, .from_amt = 100000, .to_amt = 5, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "acima do teto de swap",        { .from = A_BRL,  .to = A_USDC, .from_amt = MAX_SWAP_BRL + 1, .to_amt = 1, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 1 } },
+        { "cotacao marcada como invalida",{ .from = A_BRL,  .to = A_USDC, .from_amt = 100000, .to_amt = good_out, .rate = 560, .fee_brl = 350, .expires = t0 + 20, .ok = 0 } },
+      };
+      for (unsigned i = 0; i < sizeof F / sizeof *F; i++) {
+          m_init(); m_load_demo(t0); M.pol.cooldown_s = 0; M.pol.pin_max = M.pol.confirm_max = INT64_C(1) << 50; M.pol.per_tx = M.pol.daily = INT64_C(1) << 50;
+          int64_t b0 = m_balance(A_BRL), u0 = m_balance(A_USDC); int n0 = M.n; char nm[96];
+          Tx *tx = m_prepare_swap(&F[i].q, t0, &e);
+          snprintf(nm, sizeof nm, "cotacao forjada recusada: %s", F[i].name);
+          CHECK(nm, tx == NULL && e && e[0]);
+          snprintf(nm, sizeof nm, "cotacao forjada nao cria transacao nem mexe nos saldos: %s", F[i].name);
+          CHECK(nm, M.n == n0 && m_balance(A_BRL) == b0 && m_balance(A_USDC) == u0);
+      }
+      /* the control: an honest quote still goes through and moves exactly what it says / o controle: a cotação honesta passa */
+      m_init(); m_load_demo(t0); M.pol.cooldown_s = 0; M.pol.pin_max = M.pol.confirm_max = INT64_C(1) << 50;
+      Quote hq; CHECK("cotacao honesta: m_quote", m_quote(A_BRL, A_USDC, 100000, t0, &hq));
+      Tx *ht = m_prepare_swap(&hq, t0, &e);
+      CHECK("cotacao honesta: preparada", ht != NULL);
+      if (ht) { auth_expect(ht->id); pin_check("123456", t0 + 1); auth_confirm(ht->id, t0 + 1);
+                CHECK("cotacao honesta: autorizada e confirmada", m_authorize(ht, t0 + 1) == NULL && ht->st == S_CONFIRMED);
+                CHECK("cotacao honesta: moveu exatamente o cotado", m_balance(A_BRL) == 1000000 - 100000 && m_balance(A_USDC) == 100000000 + good_out); }
+      /* an expiry earlier than the engine's lifetime is allowed (shorter is safe) / validade menor que a do motor é permitida */
+      m_init(); m_load_demo(t0); m_quote(A_BRL, A_USDC, 100000, t0, &hq); hq.expires = t0 + 5;
+      CHECK("validade menor que a do motor e aceita", m_prepare_swap(&hq, t0, &e) != NULL); }
+
     printf(fails ? "%d FALHAS\n" : "TODOS OK\n", fails);
     return fails != 0;
 }

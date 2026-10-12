@@ -105,13 +105,38 @@ static void run_ops(const uint8_t *d, size_t n) {
         int idx = (i < n && M.n) ? d[i] % M.n : 0;
         switch (op) {
         case 0: m_receive_pix(amount(d, n, &i), "Joao", now); break;
-        case 1: m_prepare_pix(i < n && (d[i++] & 1) ? "Maria" : "ab", amount(d, n, &i), now, &err); break;
+        case 1: { /* two arguments used to change i in the same call: the order of evaluation is unspecified in C, so the same input
+                   * behaved differently at -O0 and -O1 / dois argumentos mexiam em i na mesma chamada: a ordem de avaliação não é
+                   * definida em C, então a mesma entrada se comportava diferente em -O0 e -O1 */
+                  const char *dest = i < n && (d[i++] & 1) ? "Maria" : "ab"; int64_t cents = amount(d, n, &i);
+                  m_prepare_pix(dest, cents, now, &err); } break;
         case 2: { int f = i < n ? d[i++] % 3 - 1 : 0, to = i < n ? d[i++] % 3 - 1 : 0; int64_t amt = amount(d, n, &i);
                   have_q = m_quote(f, to, amt, now, &q);
                   /* a quote the engine gives must be inside the caps and its output must be storable / uma cotação dada tem de respeitar os tetos e a saída tem de ser gravável */
                   if (have_q) { NEED(q.ok && q.from_amt == amt && amt > 0); NEED(q.to_amt > 0 && q.to_amt <= MAX_AMOUNT);
                                 NEED(f == A_BRL ? amt <= MAX_SWAP_BRL : amt <= MAX_SWAP_USDC); } } break;
-        case 3: if (have_q) m_prepare_swap(&q, now, &err); break;
+        case 3: if (have_q) {
+                    /* The engine must not trust a Quote the caller changed (N11): mutate one field some of the time and check that
+                     * the engine accepts a swap only if every number is exactly what its own formula gives.
+                     * O motor não pode confiar numa Quote alterada pelo chamador (N11): muta um campo às vezes e confere que o
+                     * motor só aceita o swap se todo número for exatamente o da sua própria fórmula. */
+                    /* mutate a COPY: changing q itself leaked a corrupted quote into later operations (a bug of this harness) /
+                     * muta uma CÓPIA: mudar a própria q vazava uma cotação corrompida para as operações seguintes (defeito deste harness) */
+                    Quote mq = q; int field = i < n ? d[i++] % 8 : 0; int64_t delta = amount(d, n, &i);
+                    if (field == 1) mq.from_amt = delta; else if (field == 2) mq.to_amt = delta; else if (field == 3) mq.rate = delta;
+                    else if (field == 4) mq.fee_brl = delta; else if (field == 5) mq.expires = now + (delta % 100000000LL);
+                    else if (field == 6) mq.from = (int)(delta % 5 - 2); else if (field == 7) mq.to = (int)(delta % 5 - 2);
+                    int same = mq.from == q.from && mq.to == q.to && mq.from_amt == q.from_amt && mq.to_amt == q.to_amt && mq.rate == q.rate && mq.fee_brl == q.fee_brl;
+                    int n_before = M.n; Tx *sw = m_prepare_swap(&mq, now, &err);
+                    /* "same" is the honest quote: any other set of numbers is accepted only if it is ALSO exactly what m_quote gives for
+                     * that (from, to, amount): the formula floors, so a different amount can legitimately give the same output.
+                     * "same" é a cotação honesta: qualquer outro conjunto de números só é aceito se TAMBÉM for exatamente o que o m_quote
+                     * dá para aquele (origem, destino, valor): a fórmula arredonda para baixo, então outro valor pode dar a mesma saída. */
+                    if (!same && sw && M.n != n_before) { uint32_t sq = M.seq; Quote chk; NEED(m_quote(mq.from, mq.to, mq.from_amt, now, &chk));
+                        NEED(chk.to_amt == mq.to_amt && chk.rate == mq.rate && chk.fee_brl == mq.fee_brl); M.seq = sq; }
+                    if (!same && !sw) NEED(M.n == n_before);                   /* a refusal changes nothing / uma recusa não muda nada */
+                    if (sw) NEED(mq.expires <= now + 20);                      /* never outlives the engine's own lifetime / nunca passa da validade do motor */
+                } break;
         case 4: if (M.n) { i++; t = &M.tx[idx]; authorize_op(t, d, n, &i, now); } break;
         case 5: if (M.n) { i++; m_cancel(&M.tx[idx], now); } break;
         case 6: now += i < n ? (int64_t)d[i++] * 7 : 1; break;
