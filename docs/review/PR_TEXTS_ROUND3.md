@@ -91,8 +91,8 @@ fix(init): the write lock fails closed when the cmdline is cut or unreadable / a
 **Descrição**
 ```markdown
 ## Resumo / Summary
-**EN:** `bankphone.ro=1` was looked up in a fixed buffer. If `/proc/cmdline` was longer, the token at the end was cut off and the system ran **writable**. A long state-partition name was silently truncated too. Now a truncated or unreadable cmdline keeps the image read-only, and a name that does not fit is refused.
-**PT:** `bankphone.ro=1` era procurado num buffer fixo. Com `/proc/cmdline` maior, o token do fim era cortado e o sistema subia **gravável**. Um nome de partição de estado longo também era truncado em silêncio. Agora cmdline cortada ou ilegível mantém somente leitura, e nome que não cabe é recusado.
+**EN:** `bankphone.ro=1` was looked up in a fixed 4096-byte buffer. With a `/proc/cmdline` of 4097 bytes or more, the token at the end was cut off and the system ran **writable** (reproduced with a file standing in for `/proc/cmdline`). A long state-partition name was silently truncated too. Now a truncated or unreadable cmdline keeps the image read-only, and a name that does not fit is refused. **Honest reach:** no real path produces such a cmdline today (`mkboot.py` refuses 1536 bytes or more, the arm64 kernel limits it to 2048), so this is defense in depth, not an exploitable hole; a write lock should fail closed anyway.
+**PT:** `bankphone.ro=1` era procurado num buffer fixo de 4096 bytes. Com `/proc/cmdline` de 4097 bytes ou mais, o token do fim era cortado e o sistema subia **gravável**. **Alcance honesto:** hoje nenhum caminho real gera uma cmdline assim (o `mkboot.py` recusa 1536 bytes ou mais, o kernel arm64 limita a 2048); é defesa em profundidade, não brecha explorável. Um nome de partição de estado longo também era truncado em silêncio. Agora cmdline cortada ou ilegível mantém somente leitura, e nome que não cabe é recusado.
 
 ## Evidência
 `cmdline_test` 36 → 59 (cena com 4097 bytes, leitura vazia, truncamento exato); `test_store` bloco [17] para nomes longos. `make test`, `test-asan`, `lint` passam.

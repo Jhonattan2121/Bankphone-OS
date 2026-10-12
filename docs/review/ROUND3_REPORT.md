@@ -26,7 +26,7 @@ Níveis de evidência / evidence levels: **[A]** código lido · **[B]** teste o
 | 1 | `fix/money-engine-overflow-limits` | `dbee845` | D-1 a D-5 (overflow de `m_quote`, `m_total_brl`, saída que o carregador recusa, cotação forjada) | `main` |
 | 2 | `fix/money-engine-clock-range` | `aa94316` | D-6, D-7 (relógio fora de faixa, Pix sem teto) | 1 |
 | 3 | `fix/money-swap-pending-table` | `e7f776d` | D-8, D-9 (tabela de cotações pendentes) | 2 |
-| 4 | `fix/cmdline-truncation-fails-closed` | `9a68db0` | trava de escrita `bankphone.ro=1` com cmdline cortada, nome de partição truncado | `main` |
+| 4 | `fix/cmdline-truncation-fails-closed` | `9a68db0` | trava de escrita `bankphone.ro=1` com cmdline cortada (defesa em profundidade: nenhum caminho real gera cmdline tão longa), nome de partição truncado | `main` |
 | 5 | `fix/store-never-overwrite-only-good-slot` | `acdef27` | perda de dados: a gravação sobrescrevia o único slot bom | `main` |
 | 6 | `fix/pin-lockout-bounded-clock` | `9e74f13` | bloqueio permanente do PIN entre domínios de relógio; contador `int` | `main` |
 | 7 | `fix/ui-input-and-display` | `262cbdb` | valor USDC truncado em `int`, tabela de toques cheia, contagem do bloqueio, `approx_usdc` | `main` |
@@ -61,7 +61,7 @@ Fuzz (semente fixa, 25–30 s por alvo): `fuzz_money` sorteia fronteiras e extre
 
 ## 5. Não corrigido, e por quê
 
-Ver `MONEY_INVARIANTS.md` §4 (O-1…O-8). Os principais: **O-1** (espera de 30 s > validade de 20 s: swap acima de R$ 5.000 nunca é autorizado; decisão de produto),
+Ver `MONEY_INVARIANTS.md` §4 (O-1…O-9). Os principais: **O-9** (texto "há -82 min" em registros de outro boot sem relógio, cosmético), **O-1** (espera de 30 s > validade de 20 s: swap acima de R$ 5.000 nunca é autorizado; decisão de produto),
 **O-2/O-3** (domínio do relógio; precisa da #9), **O-4** (executar antes de gravar; só importa com provedor real).
 Não foi feita a centralização das constantes DEMO (N12) nem a proposta de CI ARM64.
 
@@ -74,7 +74,7 @@ Ver `HARDWARE_TESTS.md` (linhas HW-15 a HW-19 novas). Nenhum teste de aparelho f
 - Autor = auditor em `sec.c`; falta revisão humana independente.
 - PIN de 6 dígitos não resiste a ataque offline; o estado não é autenticado (ver `docs/STATE_INTEGRITY.md`).
 - Só existe prova em x86_64; o comportamento em ARM64 e a tela real do X669C não foram vistos.
-- A verificação adversarial dos achados depende de agentes automáticos; os resultados dela reduziram a prioridade de vários candidatos, mas não são revisão humana.
+- O workflow de verificação terminou (85 agentes, 0 erros). A verificação adversarial dos achados depende de agentes automáticos; os resultados dela reduziram a prioridade de vários candidatos, mas não são revisão humana.
 
 ## 8. Próxima tarefa recomendada
 

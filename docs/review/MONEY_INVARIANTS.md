@@ -70,12 +70,13 @@ verificadores com a ordem de **refutar** (um reproduz o defeito no código da `m
 | PIN: contador `int` gravado perto de `INT_MAX` | sim, 2/2 | **sim, com escrita no estado** (CRC válido, não MAC) | Corrigido na branch do PIN |
 | PIN: prazo absoluto entre domínios de relógio | sim, 2/2 | **sim:** sem RTC e com persistência | Corrigido na branch do PIN |
 | `now` em extremos do `int64` em `pin_check`, `pin_locked_s`, idade da concessão, validade da cotação, janela diária, espera | sim (só em chamada direta) | **não** por entrada real: exige `plat_now()` fora de faixa | Tornados inofensivos por validação do relógio; sem alegar que eram exploráveis |
+| Cmdline maior que o buffer de 4096 bytes derruba `bankphone.ro=1` | sim (só com cmdline ≥ 4097 bytes) | **não por caminho real:** `mkboot.py` recusa cmdline ≥ 1536 bytes, o kernel arm64 limita a 2048, e quem injeta mais que isso já controla a cmdline | Correção mantida como **defesa em profundidade** (falhar aberto numa trava de escrita é o lado errado de errar); **não** é vulnerabilidade explorável hoje |
 | Cotação aceita com o relógio andando para trás; Pix datado no futuro na janela | sim | parcial (domínio do relógio) | Ligado a O-2 e O-3; a #9 |
 
 Três candidatos foram **rebaixados** (reproduzem só fora do alcance de qualquer entrada real): a soma diária com política acima de ≈ 4,6e18 (só com código
 externo que altere `M.pol`), o agregado de swaps acima de 1e15 (exige chamada direta com valor que a UI não permite) e os campos forjados da cotação
 (inalcançável pela UI). Eles continuam cobertos por teste porque a API é pública, mas **não** são tratados como vulnerabilidade explorável.
-Esta lista reflete o diário do workflow no momento da escrita; ao fim da execução, se algum veredito mudar, esta seção deve ser atualizada.
+O workflow terminou (85 agentes, 0 erros); os vereditos acima são os finais.
 
 ## 4. Achados que **não** estão corrigidos, com a razão / findings NOT fixed, and why
 
@@ -89,6 +90,7 @@ Esta lista reflete o diário do workflow no momento da escrita; ao fim da execu�
 | **O-6** | Total acima de ≈ R$ 10 bi é cortado na tela (os dígitos passam da borda do cartão) | Limite de interface; o motor guarda certo | Reduzir a fonte conforme a largura, ou limitar o total exibido |
 | **O-7** | Política (`M.pol`) é gravável por qualquer um e não tem teto próprio | Só os testes a alteram; com o teto de `MAX_AMOUNT` no `m_prepare_pix` o risco de soma estourar some | Um setter validado quando a política puder ser configurada |
 | **O-8** | (relatado por um finder; **não reproduzi**) a UI volta da tela de revisão sem cancelar e deixa a transação em `AWAITING_AUTH` | Com a devolução das vagas vencidas (I-11) não trava mais, mas a linha fica na lista até o reboot | Cancelar ao voltar da tela de revisão |
+| **O-9** | Texto de "quando" com valor negativo: um registro criado em outro boot sem relógio (carimbo de uptime, p. ex. 5000 s) é mostrado como `há -82 min` na aba Dinheiro e `em 83min de uptime` na Atividade; com relógio válido vira uma data de 1969. Reproduzido e alcançável (aparelho sem RTC, com persistência, após reinício) | Cosmético, sem overflow; a causa é a mesma da O-2 (o registro não diz em qual domínio de relógio foi criado) | Tratar junto com a #9; enquanto isso, mostrar "antes deste boot" quando `created > agora` |
 
 ## 5. Evidência de teste (computador)
 
