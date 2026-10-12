@@ -172,6 +172,7 @@ static long read_long(const char *path)
 
 /* ---------------------------------------------------------------- config -- */
 
+static int slot_payload_good(int s);   /* defined with slot_read() below / definida junto do slot_read() abaixo */
 static char cfg_part[24];
 static char cfg_hash[24];
 static char cfg_file[160];
@@ -330,6 +331,10 @@ int store_open(void)
         if (!head_ok(&h)) { ST.slot_ok[s] = 0; continue; }  /* cabeçalho rasgado */
         ST.seq[s] = h.seq; ST.len[s] = h.len;
         ST.slot_ok[s] = (h.state == ST_PENDING) ? 2 : 1;
+        if (ST.slot_ok[s] == 1 && !slot_payload_good(s)) {
+            ST.slot_ok[s] = 0;                              /* good header, bad content: not a good slot / cabeçalho bom, conteúdo ruim: não é slot bom */
+            logf_("store: slot %c com cabeçalho válido mas conteúdo inválido (CRC)", 'A' + s);
+        }
     }
 
     if (ST.claimed) {
@@ -389,12 +394,27 @@ static int slot_read(int s, unsigned char *buf, size_t cap, size_t *n, SHead *ho
     SHead h;
     if (io_read(&h, sizeof h, off) != 0 || !head_ok(&h)) return -1;
     if (h.state != ST_OK) return -2;                       /* PENDENTE: não serve */
-    if (h.len == 0 || h.len > ST_SLOT_BYTES - sizeof(SHead) || h.len > cap) return -1;
+    if (h.len == 0 || h.len > ST_SLOT_BYTES - sizeof(SHead)) return -1;
+    if (h.len > cap) return -3;                            /* the caller's buffer is too small: NOT a bad slot / o buffer de quem chama é pequeno: NÃO é slot ruim */
     if (io_read(buf, h.len, off + sizeof h) != 0) return -1;
     if (crc32_(buf, h.len) != h.crc) return -1;
     if (hout) *hout = h;
     *n = h.len;
     return 0;
+}
+
+/* Header AND payload good (the CRC of the content matches). A slot whose header is fine but whose content fails the CRC is NOT a good slot:
+ * counting it as one made store_save overwrite the only good copy (reproduced on 32932dd).
+ * Cabeçalho E conteúdo bons (o CRC do conteúdo confere). Um slot de cabeçalho bom e conteúdo com CRC errado NÃO é um slot bom: contá-lo
+ * como bom fazia o store_save sobrescrever a única cópia boa (reproduzido no 32932dd). */
+static int slot_payload_good(int s)
+{
+    unsigned char *tmp = malloc(ST_SLOT_BYTES);
+    if (!tmp) return 1;                                    /* cannot check: keep the old (header-only) belief / não dá para conferir: mantém a crença antiga */
+    size_t n = 0;
+    int rc = slot_read(s, tmp, ST_SLOT_BYTES, &n, NULL);
+    free(tmp);
+    return rc == 0;
 }
 
 int store_load(void *buf, size_t cap, size_t *n)
@@ -421,7 +441,8 @@ int store_load(void *buf, size_t cap, size_t *n)
         existe[s] = 1;
         if (head_ok(&h)) {
             ST.seq[s] = h.seq; ST.len[s] = h.len;
-            ST.slot_ok[s] = (h.state == ST_PENDING) ? 2 : 1;
+            int rc_s = s == 0 ? a : b;                      /* the content check done above / a conferência do conteúdo feita acima */
+            ST.slot_ok[s] = (h.state == ST_PENDING) ? 2 : (rc_s == -1 ? 0 : 1);
         }
     }
 
