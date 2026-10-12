@@ -43,7 +43,11 @@ const char *SHEET_CONTACTS[3] = { "Maria Souza", "João Lima", "Ana Costa" };
 
 /* alvos de toque */
 typedef struct { int x, y, w, h, act, arg; } Hit;
-#define MAX_HITS 220
+/* One hit per ledger row (the Activity tab registers them all, off-screen ones included, BEFORE the status bar and the navigation bar) plus the
+ * rest of the screen. With 220 the navigation bar vanished from 216 rows on and the person could not leave the tab. Reproduced on 32932dd.
+ * Um alvo por linha do livro-razão (a aba Atividade registra todos, os fora da tela também, ANTES da barra de status e da de navegação) mais o resto
+ * da tela. Com 220 a barra de navegação sumia a partir de 216 linhas e a pessoa não saía da aba. Reproduzido no 32932dd. */
+#define MAX_HITS (MAX_TX + 120)
 static Hit hits[MAX_HITS];
 static int nh;
 static int prev_total, prev_below, prev_min_dp;
@@ -131,11 +135,11 @@ static int cur_screen(void) { return sp ? stack[sp - 1] : tab; }
 int sheet_pend_tx(void) { return SH.pend; }
 int sheet_rcpt_tx(void) { return SH.rcpt; }
 
-int sheet_amt_value(int asset)
+int64_t sheet_amt_value(int asset)
 {
     int64_t d = parse_cents(SH.amt);
     if (d < 0) return 0;
-    return (int)(asset == A_BRL ? d : d * 10000);
+    return asset == A_BRL ? d : d * 10000;       /* d <= 1e11 (parse_cents), so d * 10000 <= 1e15: no overflow / sem estouro */
 }
 
 void sheet_amt_str(char *o, size_t n, int asset)
