@@ -10,6 +10,21 @@ someone who does not know the PIN, with a MAC keyed from the PIN-derived state k
 lockout counter, detecting rollback to an older valid state, and any protection once the PIN is guessed offline. Encrypting the state is a separate
 decision that needs a cipher the project does not have. Do not claim more than this.
 
+## 0. Revisão da rodada 4 / Round 4 revision
+
+Esta revisão **não implementa nada**. Ela corrige o que a primeira versão deixava implícito e acrescenta o ciclo de vida da chave, o ataque offline, o rollback e os critérios de decisão.
+
+**Quatro propriedades diferentes, que um desenho não pode confundir / four different properties:**
+
+| Propriedade | O que garante | O que **não** garante | Mecanismo possível aqui |
+|---|---|---|---|
+| **Integridade acidental** | detecta bit trocado, queda de energia, gravação pela metade | adulteração deliberada | CRC32 + dois slots + leitura de volta (**já existe**) |
+| **Autenticidade (MAC)** | detecta alteração feita por quem **não tem a chave** | confidencialidade; restauração de um estado antigo válido; qualquer coisa se a chave vazar | HMAC-SHA256 com chave derivada do PIN (**proposto**, depende do #13) |
+| **Confidencialidade (cifra)** | quem lê a partição não vê saldos nem transações | integridade, se for cifra sem autenticação; rollback | AEAD (**o repositório não tem cifra**); decisão pendente |
+| **Anti-rollback** | detecta a volta a um estado antigo **válido** | — | **só** com contador monotônico que o atacante não consegue regredir. **Não existe no aparelho (verificado só por leitura)**; ver §9 |
+
+**Consequência central, dita sem rodeios:** o verificador do PIN está **gravado ao lado do livro-razão**. Quem copia a partição testa PINs **offline**, sem nenhum bloqueio, e depois deriva `K_state`/`K_mac` do PIN certo e forja um MAC válido. Logo, **a segurança do MAC é exatamente a resistência offline do PIN**. Com PIN de 6 dígitos (10^6 combinações) e o scrypt padrão do #13 (118 a 141 ms por tentativa em um núcleo, medido no container, **não** no aparelho), isso é da ordem de **33 a 39 horas em um núcleo** e **cerca de 20 a 23 minutos com 100 núcleos** (estimativa linear, **não medida em paralelo**). O MAC protege contra adulteração **sem esse esforço** (um script, um erro, um estado trocado por engano), **não** contra um adversário que dedica algumas horas de máquina.
+
 ## 1. Estado atual (lido no código, `main` em `32932dd`)
 
 | Fato | Evidência |
@@ -103,3 +118,43 @@ decision that needs a cipher the project does not have. Do not claim more than t
 | Onde guardar o contador de tentativas | continua em claro no slot; ou numa seção separada sem MAC | seção separada, para o MAC do livro-razão não depender dele |
 | Comportamento com os dois slots inválidos | esvaziar e avisar; ou recusar o boot do sistema financeiro | esvaziar e avisar, sem apagar os slots |
 | Dependência externa | seguir sem; ou libsodium | decidir junto com a revisão do #13 |
+
+## 9. Rollback e hardware: o que seria preciso, e o que **não** foi verificado
+
+- Um contador **dentro do estado** é regredido junto com o estado. Um contador em **outra partição** é regredido por quem escreve nas duas. O `seq` do slot não ajuda (T4).
+- O que resolveria é um contador monotônico **em hardware** que o atacante não consiga baixar. Candidatos, **todos NÃO VERIFICADOS neste aparelho** (HW-21): a partição **RPMB** do eMMC (contador de escrita autenticado), um TEE (o X669C com bootloader desbloqueado e sem Android: não há razão para supor que exista um acessível) ou um elemento seguro externo (não existe).
+- **Aviso:** a chave da RPMB é programada **uma única vez e de forma irreversível**. Nenhum teste deste projeto deve gravá-la sem aprovação humana explícita; a investigação de HW-21 é só leitura de capacidade.
+- Enquanto isso não for provado: **o sistema não detecta rollback**, e nenhum texto do projeto pode dizer o contrário. O teste de aceite 8 (§7) existe para impedir essa afirmação.
+
+## 10. Ciclo de vida da chave (especificação, nada implementado)
+
+| Etapa | Regra |
+|---|---|
+| Derivação | `K_state = scrypt(PIN, sal, custo)` (já no #13, rótulo `bankphone/pin/v2`); `K_mac = HKDF-SHA256(K_state, info = "bankphone/ledger-mac/v1")`. **Nunca** usar o verificador como chave nem o contrário (já separados por HKDF no #13) |
+| Uso | só em memória, só enquanto desbloqueado; comparação do MAC em tempo constante (`sec_ct_eq`) |
+| Invalidação | `pin_forget_key()` ao bloquear a tela (já existe no #13) e ao trocar de PIN; **nunca** gravar a chave |
+| Migração `V1`→`S2` | só no primeiro desbloqueio certo com o PIN do #13; o livro-razão `V1` passa pelo carregador estrito (N15) e é regravado `S2` **num slot novo**; o slot `V1` fica válido até o novo ser confirmado (o protocolo de dois slots já dá isso) |
+| Troca de PIN | sal novo, `K_state` novo, MAC recalculado, gravado num slot novo; o antigo vale até o novo ser confirmado |
+| Recuperação | os dois slots têm MAC próprio; se um falha, o outro vale; se os dois falham, abre vazio **sem apagar** os slots (evidência) e avisa |
+| Custo do scrypt trocado | o verificador carrega o custo (`P2`); mudar o custo exige o PIN (`pin_check` certo) e regrava |
+| Downgrade para firmware antigo | o firmware antigo recusa `S2` (linha desconhecida) e **sobe com estado novo**: perda de dados (R-1). Mitigação: avisar antes de instalar; **não** inventar uma "versão mínima" gravada no estado (um atacante a regride) |
+
+## 11. Critérios para **decidir** antes de implementar (preciso de aprovação humana)
+
+| Pergunta | Opção A | Opção B | Recomendação |
+|---|---|---|---|
+| O MAC com chave do PIN justifica o custo/complexidade, dado o ataque offline? | sim, como proteção contra adulteração simples e como pré-requisito de qualquer cifra | não; esperar um segredo preso a hardware | **A, dita com honestidade** ("detecta adulteração simples; não resiste a quem testa PINs offline") |
+| Cifrar o livro-razão agora? | não (fase DEMO, dado fictício) | adotar AEAD revisado (libsodium XChaCha20-Poly1305) | **A** até haver dado real; **B** antes de qualquer dado real |
+| PIN de 6 dígitos ou senha longa? | manter (UX) | frase longa opcional para quem quiser | decisão de produto; o ganho de segurança vem daqui, não do MAC |
+| Onde guarda contador de tentativas e bloqueio? | no slot, em claro (hoje) | seção separada sem MAC | **B**, para o MAC do livro-razão não depender dele (T3) |
+| Dois slots inválidos | abrir vazio, avisar, **não** sobrescrever | recusar o boot | **A** |
+
+**Bloqueadores antes de implementar:** (1) #13 revisado por pessoa independente e mesclado; (2) HW-07 (custo do scrypt no aparelho) para saber quanto custa cada desbloqueio; (3) as decisões da tabela acima; (4) a política do contador do #13 × `main` (`RECONCILE_PR13_PR15.md` §3).
+
+## 12. Testes de aceite adicionais (além da §7)
+
+11. **PIN offline:** um teste que, dado o estado `S2`, tenta recuperar o PIN por força bruta em um espaço pequeno e **mostra** que a chave sai (para documentar o limite da §0, não para "provar segurança").
+12. **Migração com queda de energia em cada passo** (o injetor de falhas do `store` já existe) e **PIN errado durante a migração** nunca corrompe o `V1`.
+13. **Troca de PIN com queda de energia:** o PIN antigo continua valendo até o novo slot ser confirmado.
+14. **Estado `S2` com MAC válido de outro PIN** é recusado depois da troca de PIN.
+15. **Fuzz** do parser do formato `S2` (truncado, campo gigante, MAC curto).

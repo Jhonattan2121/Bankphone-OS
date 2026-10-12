@@ -43,7 +43,7 @@ no repositório) · `VERIFICADO` (log + foto/captura arquivados no repositório)
 
 ## Linhas adicionadas na rodada 3 / Rows added in round 3
 
-Todas **NÃO VERIFICADO**. Nenhuma pede gravação automática.
+Todas **NÃO VERIFICADO**. Nenhuma pede gravação automática. O roteiro de execução de HW-01, HW-04 e HW-05 está em `HW_PLAN_R4.md`.
 
 | ID | O que provar | Procedimento (resumo) | Resultado esperado | Evidência necessária | Ligado a |
 |---|---|---|---|---|---|
@@ -52,6 +52,9 @@ Todas **NÃO VERIFICADO**. Nenhuma pede gravação automática.
 | HW-17 | Contagem do bloqueio na tela de PIN | Provocar o bloqueio na tela de autorização de swap e na tela de desbloqueio | A contagem decresce na folha de PIN, não só no desbloqueio | Fotos em 3 instantes | `fix/ui-input-and-display` |
 | HW-18 | Tabela de toques com um livro-razão longo | Carregar um estado de teste com 300+ linhas (cópia, nunca o estado real) e abrir a Atividade | A barra de abas e a engrenagem continuam respondendo ao toque | Vídeo curto ou fotos | `fix/ui-input-and-display` |
 | HW-19 | Leitura de `/proc/cmdline` maior que o buffer | Imagem de teste com cmdline longa (>4 KiB) e `bankphone.ro=1` no fim | A imagem se comporta como somente leitura (falha fechada) | Log do boot + hash da região de estado antes/depois | `fix/cmdline-truncation-fails-closed` |
+
+| HW-20 | Arquitetura do espaço de usuário no aparelho | Com o sistema rodando (serial), registrar `uname -m` equivalente e o tamanho de `time_t`; conferir que o binário `aarch64-linux-musl` estático do `build.sh` executa | 64 bits, `time_t` de 64 bits | Log serial com a informação | **NÃO VERIFICADO** (o `build.sh` assume; só há compilação e emulação, nível B) | `HW_PLAN_R4.md`, `ISSUE9_CLOCK_AND_ARM64_CI.md` |
+| HW-21 | Existe RPMB acessível (contador monotônico em hardware)? | **Somente leitura** de capacidade do eMMC, sem Android. **Nunca** programar a chave da RPMB (irreversível) | Resposta documentada (sim/não) e como se acessa | Saída do comando e hash do relatório | **NÃO VERIFICADO**; só leitura de código e de documentação | `docs/STATE_INTEGRITY.md` §9 |
 
 Ordem: HW-15 antes de HW-16, que depende do domínio do relógio medido.
 
