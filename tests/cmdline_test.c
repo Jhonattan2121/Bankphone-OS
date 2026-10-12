@@ -1,6 +1,7 @@
 /* Testes do parser da linha de comando do kernel (init/cmdline.h). / Tests for the kernel cmdline parser.
  * Cada linha PASS/FAIL é uma verificação. / Each PASS/FAIL line is one check. */
 #include "../init/cmdline.h"
+#include "../init/cmdline_load.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +92,55 @@ int main(void) {
       int okk = 1; for (int i = 0; i < CMDLINE_PROP_SLOTS - 1; i++) okk &= !strcmp(a[i], i % 2 ? "expdb" : "1");
       CHECK("os ultimos SLOTS-1 resultados continuam validos ao mesmo tempo", okk); }
     CHECK("cmdline_prop de chave ausente devolve string vazia (nunca NULL)", prop_absent());
+
+
+    /* ---- N14b: the write lock fails CLOSED. Reproduced on 32932dd: the old code cut /proc/cmdline at 4095 bytes without a word, so a
+     *      command line of 4097 bytes ending in "bankphone.ro=1" was read as "bankphone.ro=" (lock off), and an unreadable file also
+     *      meant "lock off". Both let the system write to partitions the person had asked it not to touch.
+     * ---- N14b: a trava de gravação falha FECHADA. Reproduzido no 32932dd: o código antigo cortava o /proc/cmdline em 4095 bytes sem
+     *      avisar, então uma cmdline de 4097 bytes terminando em "bankphone.ro=1" era lida como "bankphone.ro=" (trava desligada), e
+     *      um arquivo ilegível também significava "trava desligada". Os dois deixavam o sistema gravar em partições que a pessoa pediu para não tocar. ---- */
+    { const char *path = "/tmp/bp-cmdline-test.bin"; static char buf[CMDLINE_MAX + 16]; char small[64];
+      #define WRITE_FILE(content, len) do { FILE *f_ = fopen(path, "wb"); fwrite((content), 1, (len), f_); fclose(f_); } while (0)
+      /* the exact scene of the bug / a cena exata do bug */
+      static char scene[4200]; memset(scene, 'x', 4081); scene[4081] = 0; strcat(scene, " bankphone.ro=1\n");
+      CHECK("a cena do bug tem 4097 bytes", strlen(scene) == 4097);
+      WRITE_FILE(scene, strlen(scene));
+      { static char old[4096]; FILE *f = fopen(path, "rb"); size_t n = fread(old, 1, sizeof old - 1, f); fclose(f); old[n] = 0;
+        CHECK("o caminho ANTIGO (4096 bytes, sem aviso) le a trava como desligada", cmdline_prop(old, "bankphone.ro")[0] != '1'); }
+      { static char cl[4096]; int st = cmdline_load(path, cl, sizeof cl);
+        CHECK("cmdline_load avisa que o texto foi cortado", st == CMDLINE_TRUNCATED);
+        CHECK("o texto guardado tem cap-1 bytes e NUL no fim", strlen(cl) == sizeof cl - 1);
+        CHECK("sem o aviso, a parte visivel diz 'bankphone.ro=' vazio", cmdline_prop(cl, "bankphone.ro")[0] == 0);
+        CHECK("com o aviso, a trava e lida como LIGADA (falha fechada)", !strcmp(cmdline_prop_safe(cl, st, "bankphone.ro"), "1")); }
+      /* load: sizes around the limit / carga: tamanhos ao redor do limite */
+      memset(buf, 'a', 200); WRITE_FILE("", 0);
+      CHECK("arquivo vazio: OK e texto vazio", cmdline_load(path, small, sizeof small) == CMDLINE_OK && small[0] == 0);
+      WRITE_FILE("console=ttyS0 bankphone.ro=1\n", 29);
+      CHECK("arquivo pequeno: OK e conteudo igual", cmdline_load(path, small, sizeof small) == CMDLINE_OK && !strcmp(small, "console=ttyS0 bankphone.ro=1\n"));
+      WRITE_FILE(buf, 63);
+      CHECK("63 bytes num buffer de 64: cabe (OK)", cmdline_load(path, small, sizeof small) == CMDLINE_OK && strlen(small) == 63);
+      WRITE_FILE(buf, 64);
+      CHECK("64 bytes num buffer de 64: um byte a mais (cortado)", cmdline_load(path, small, sizeof small) == CMDLINE_TRUNCATED && strlen(small) == 63);
+      { static char hugef[100000]; memset(hugef, 'b', sizeof hugef); WRITE_FILE(hugef, sizeof hugef);
+        CHECK("arquivo de 100000 bytes: cortado, sem estourar", cmdline_load(path, small, sizeof small) == CMDLINE_TRUNCATED && strlen(small) == 63); }
+      remove(path);
+      CHECK("arquivo que nao existe: ilegivel, texto vazio", cmdline_load("/tmp/bp-cmdline-nao-existe", small, sizeof small) == CMDLINE_UNREADABLE && small[0] == 0);
+      CHECK("caminho NULL, buffer NULL e cap pequeno: ilegivel", cmdline_load(NULL, small, sizeof small) == CMDLINE_UNREADABLE && cmdline_load(path, NULL, 10) == CMDLINE_UNREADABLE && cmdline_load(path, small, 1) == CMDLINE_UNREADABLE);
+      CHECK("diretorio no lugar do arquivo: ilegivel", cmdline_load("/tmp", small, sizeof small) == CMDLINE_UNREADABLE);
+      CHECK("o buffer cabe o limite do kernel com folga", CMDLINE_MAX >= 4 * 4096);
+      /* the policy / a politica */
+      const char *cl = "console=ttyS0 bankphone.state=expdb bankphone.statehash=0123456789abcdef";
+      CHECK("status OK: usa o que o texto diz (ro ausente = vazio)", cmdline_prop_safe(cl, CMDLINE_OK, "bankphone.ro")[0] == 0);
+      CHECK("status OK: ro=0 explicito segue 0", !strcmp(cmdline_prop_safe("bankphone.ro=0", CMDLINE_OK, "bankphone.ro"), "0"));
+      CHECK("status OK: ro=1 segue 1", !strcmp(cmdline_prop_safe("bankphone.ro=1", CMDLINE_OK, "bankphone.ro"), "1"));
+      CHECK("texto cortado: ro vira 1 mesmo com ro=0 visivel", !strcmp(cmdline_prop_safe("bankphone.ro=0", CMDLINE_TRUNCATED, "bankphone.ro"), "1"));
+      CHECK("texto ilegivel: ro vira 1", !strcmp(cmdline_prop_safe("", CMDLINE_UNREADABLE, "bankphone.ro"), "1"));
+      CHECK("texto cortado: as outras chaves seguem o que o texto visivel diz", !strcmp(cmdline_prop_safe(cl, CMDLINE_TRUNCATED, "bankphone.state"), "expdb"));
+      CHECK("texto cortado: chave ausente continua vazia", cmdline_prop_safe(cl, CMDLINE_TRUNCATED, "bankphone.devcmd")[0] == 0);
+      CHECK("chave NULL nao quebra", cmdline_prop_safe(cl, CMDLINE_TRUNCATED, NULL)[0] == 0);
+      #undef WRITE_FILE
+    }
 
     puts(fails ? "FALHAS" : "TODOS OK");
     return fails != 0;

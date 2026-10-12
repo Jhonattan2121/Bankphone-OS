@@ -453,6 +453,27 @@ int main(void)
         CHK(depois == antes, "descritores abertos: %d antes, %d depois", antes, depois);
     }
 
+    /* ------------------------------------------------------------- 17 -- */
+    printf("\n[17] nome de partição longo é RECUSADO, nunca encurtado / a long partition name is refused, never shortened\n");
+    {
+        mkpart(0); char h[24]; regiao_hash(h);            /* before the refusals: store_open() clears ST / antes das recusas: o store_open() zera o ST */
+        store_close();
+        /* 36 characters (a GPT name can be that long): used to become its 23-character prefix / 36 caracteres: virava o prefixo de 23 */
+        store_config("abcdefghijklmnopqrstuvwxyz0123456789", "0123456789abcdef");
+        CHK(store_open() != 0, "nome de 36 caracteres deveria ser recusado");
+        CHK(strstr(ST.why, "longo demais") != NULL, "o motivo deveria dizer que o nome é longo demais: '%s'", ST.why);
+        CHK(ST.part[0] == 0 || strlen(ST.part) < 24, "a partição pedida não deveria ficar guardada encurtada");
+        store_config("abcdefghijklmnopqrstuvw", "0123456789abcdef");           /* 23: fits / cabe */
+        CHK(store_open() != 0 && strstr(ST.why, "longo demais") == NULL && strstr(ST.why, "não existe") != NULL,
+              "nome de 23 caracteres cabe: a falha deveria ser 'não existe', foi '%s'", ST.why);
+        store_config("abcdefghijklmnopqrstuvwx", "0123456789abcdef");          /* 24: does not fit / não cabe */
+        CHK(strstr((store_open(), ST.why), "longo demais") != NULL, "nome de 24 caracteres deveria ser recusado: '%s'", ST.why);
+        char longfile[300]; snprintf(longfile, sizeof longfile, "file:/tmp/%0200d", 1);
+        store_config(longfile, "0123456789abcdef");
+        CHK(store_open() != 0 && strstr(ST.why, "longo demais") != NULL, "caminho de arquivo longo deveria ser recusado: '%s'", ST.why);
+        { int ra = abrir(h); CHK(ra == 0, "uma configuração curta e válida volta a abrir depois das recusas (ret=%d, motivo=%s)", ra, ST.why); }
+    }
+
     unlink(PATH);
     unlink("/tmp/bp-store-hash.txt");
 
